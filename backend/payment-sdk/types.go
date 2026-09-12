@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -22,9 +23,23 @@ type Descriptor struct {
 	Name                string               `json:"name"`
 	Icon                string               `json:"icon"`
 	CheckoutMode        string               `json:"checkoutMode"`
+	Permissions         []string             `json:"permissions,omitempty"`
 	IdentityFields      []string             `json:"identityFields,omitempty"`
 	NotificationSuccess NotificationResponse `json:"notificationSuccess,omitempty"`
 	NotificationFailure NotificationResponse `json:"notificationFailure,omitempty"`
+}
+
+func (d Descriptor) Supports(permission string) bool {
+	// 兼容原有未声明的全能力支付插件
+	if len(d.Permissions) == 0 {
+		return true
+	}
+	for _, value := range d.Permissions {
+		if strings.TrimSpace(value) == permission {
+			return true
+		}
+	}
+	return false
 }
 
 type NotificationResponse struct {

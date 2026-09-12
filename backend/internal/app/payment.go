@@ -736,6 +736,10 @@ func (s *Service) queryPaymentOrder(ctx context.Context, order *model.PaymentOrd
 	if err != nil {
 		return err
 	}
+	// 易支付后端通常会退避重试通知，查单作为可选补偿能力以简化放宽插件实现。
+	if !provider.Descriptor().Supports("payment.query") {
+		return s.repo.RecordPaymentQuery(order.ID, order.ProviderStatus)
+	}
 	_ = config
 	result, err := provider.QueryOrder(ctx, values, payment.QueryRequest{MerchantOrderNo: order.MerchantOrderNo})
 	if errors.Is(err, payment.ErrOrderNotFound) {
@@ -757,6 +761,13 @@ func (s *Service) closePaymentOrder(ctx context.Context, order *model.PaymentOrd
 	provider, _, values, err := s.paymentRuntimeForOrder(order)
 	if err != nil {
 		return err
+	}
+	// 不支持关单时仅关闭本地订单，异步通知仍可完成入账。
+	if !provider.Descriptor().Supports("payment.close") {
+		if err := s.queryPaymentOrder(ctx, order); err != nil {
+			return err
+		}
+		return s.repo.MarkPaymentOrderClosed(order.ID, "LOCAL_EXPIRED")
 	}
 	queryNotFound := false
 	result, queryErr := provider.QueryOrder(ctx, values, payment.QueryRequest{MerchantOrderNo: order.MerchantOrderNo})

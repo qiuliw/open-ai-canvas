@@ -28,6 +28,7 @@ func DescriptorFromManifest(manifest protocol.Manifest, provider protocol.Manife
 	return Descriptor{
 		ID: provider.ID, PluginID: manifest.Metadata.ID, PluginVersion: manifest.Metadata.Version, Name: provider.Label,
 		Icon: provider.Icon, CheckoutMode: provider.CheckoutMode,
+		Permissions:         append([]string(nil), manifest.Permissions...),
 		IdentityFields:      append([]string(nil), provider.IdentityFields...),
 		NotificationSuccess: NotificationResponse{Status: provider.NotificationSuccess.Status, ContentType: provider.NotificationSuccess.ContentType, Body: provider.NotificationSuccess.Body},
 		NotificationFailure: NotificationResponse{Status: provider.NotificationFailure.Status, ContentType: provider.NotificationFailure.ContentType, Body: provider.NotificationFailure.Body},
