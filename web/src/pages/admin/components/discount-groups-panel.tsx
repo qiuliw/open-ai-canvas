@@ -202,10 +202,10 @@ export default function DiscountGroupsPanel({
     ];
 
     return (
-        <section className="admin-credit-drawer-section" aria-label="用户倍率分组">
+        <section className="admin-credit-drawer-section" aria-label="用户倍率分组（叠加上方策略）">
             <div className="admin-credit-drawer-section-heading admin-credit-drawer-section-heading-with-action">
                 <div>
-                    <h3>用户倍率分组</h3>
+                    <h3>用户倍率分组（叠加上方策略）</h3>
                     <p>给部分用户单独调价，到用户管理里分配。</p>
                 </div>
                 <div className="flex items-center gap-1">
