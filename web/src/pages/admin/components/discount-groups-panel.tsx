@@ -206,7 +206,7 @@ export default function DiscountGroupsPanel({
             <div className="admin-credit-drawer-section-heading admin-credit-drawer-section-heading-with-action">
                 <div>
                     <h3>用户倍率分组</h3>
-                    <p>最终计费再乘本分组倍率，在用户管理中分配。</p>
+                    <p>给部分用户单独调价，到用户管理里分配。</p>
                 </div>
                 <div className="flex items-center gap-1">
                     <Button type="text" size="small" icon={<RefreshCw className="size-3.5" />} loading={loading} onClick={() => void reload(page, pageSize)}>
@@ -228,7 +228,7 @@ export default function DiscountGroupsPanel({
                     columns,
                     dataSource: groups,
                 }}
-                empty={<AdminTableEmpty title="还没有用户倍率分组" description="创建后可在用户管理中分配。" />}
+                empty={<AdminTableEmpty title="还没有分组" description="创建后到用户管理里分配。" />}
                 footer={
                     <PaginationBar
                         current={page}
@@ -273,7 +273,7 @@ export default function DiscountGroupsPanel({
                     <Form.Item
                         name="defaultMultiplier"
                         label="分组默认倍率"
-                        extra="与全局策略倍率相乘。例如全局 1.2x、分组 0.8x，最终 0.96x。"
+                        extra="1 为原价，0.8 为八折；会叠在上方策略倍率上。"
                         rules={[
                             { required: true, message: "请填写默认倍率" },
                             { type: "number", min: 0.0001, max: 100, message: "请输入 0.0001–100" },
@@ -319,7 +319,7 @@ export default function DiscountGroupsPanel({
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="admin-credit-multiplier-empty">暂无模型独立倍率，分组内所有模型使用分组默认倍率。</div>
+                                    <div className="admin-credit-multiplier-empty">暂无模型独立倍率，分组内模型都用默认倍率。</div>
                                 )}
                             </>
                         )}
