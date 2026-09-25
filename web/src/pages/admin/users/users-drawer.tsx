@@ -101,10 +101,10 @@ export function AdminUserEditDrawer({
                 <Form.Item name="status" label="账号状态" extra={editingSelf ? "不能停用当前登录账号。" : "停用后会清除登录态，但保留身份、任务和积分流水。"}>
                     <Select disabled={editingSelf} options={[{ label: "已启用", value: "active" }, { label: "已停用", value: "disabled" }]} />
                 </Form.Item>
-                <Form.Item name="discountGroupId" label="用户倍率分组" extra="启用中的分组会与全局折扣策略倍率相乘叠加，仅影响后续新订单。">
+                <Form.Item name="discountGroupId" label="用户倍率分组" extra="最终计费再乘本分组倍率。">
                     <Select
                         allowClear
-                        placeholder="不使用用户倍率分组"
+                        placeholder="不使用"
                         options={discountGroups.map((group) => ({
                             label: group.enabled ? group.name : `${group.name}（已停用）`,
                             value: group.id,

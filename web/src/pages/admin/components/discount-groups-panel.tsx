@@ -206,7 +206,7 @@ export default function DiscountGroupsPanel({
             <div className="admin-credit-drawer-section-heading admin-credit-drawer-section-heading-with-action">
                 <div>
                     <h3>用户倍率分组</h3>
-                    <p>分配给用户后，与上方默认/模型倍率相乘叠加；在用户管理中指定分组。</p>
+                    <p>最终计费再乘本分组倍率，在用户管理中分配。</p>
                 </div>
                 <div className="flex items-center gap-1">
                     <Button type="text" size="small" icon={<RefreshCw className="size-3.5" />} loading={loading} onClick={() => void reload(page, pageSize)}>
@@ -228,7 +228,7 @@ export default function DiscountGroupsPanel({
                     columns,
                     dataSource: groups,
                 }}
-                empty={<AdminTableEmpty title="还没有用户倍率分组" description="创建后可在用户管理中分配，仅影响后续新订单。" />}
+                empty={<AdminTableEmpty title="还没有用户倍率分组" description="创建后可在用户管理中分配。" />}
                 footer={
                     <PaginationBar
                         current={page}

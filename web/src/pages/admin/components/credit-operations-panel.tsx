@@ -482,17 +482,17 @@ export default function CreditOperationsPanel({ users, activeOperation, onOperat
                 footer={
                     <div className="flex justify-end gap-2">
                         <Button disabled={savingPolicy} onClick={() => onOperationChange(null)}>
-                            关闭
+                            取消
                         </Button>
                         <Button type="primary" loading={savingPolicy} disabled={loadingPolicy} onClick={() => policyForm.submit()}>
-                            保存全局策略
+                            保存策略
                         </Button>
                     </div>
                 }
             >
                 <div className="admin-credit-drawer-intro">
                     <strong>后续订单计费规则</strong>
-                    <p>全局倍率与用户倍率分组相乘叠加；修改只影响保存后创建的新订单，不会追溯调整历史订单。</p>
+                    <p>修改只影响保存后创建的新订单，不会追溯调整历史订单。</p>
                 </div>
                 {loadingPolicy ? (
                     <div className="admin-credit-drawer-loading" role="status">
