@@ -273,7 +273,7 @@ export default function DiscountGroupsPanel({
                     <Form.Item
                         name="defaultMultiplier"
                         label="分组默认倍率"
-                        extra="1 为原价，0.8 为八折；会叠在上方策略倍率上。"
+                        extra="1 为原价，0.8 为八折。"
                         rules={[
                             { required: true, message: "请填写默认倍率" },
                             { type: "number", min: 0.0001, max: 100, message: "请输入 0.0001–100" },
