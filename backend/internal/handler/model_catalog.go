@@ -12,7 +12,8 @@ import (
 // RegisterModelCatalogRoutes 注册统一模型目录路由
 func RegisterModelCatalogRoutes(r *gin.RouterGroup, svc *service.Service) {
 	r.POST("/model-catalog/quote", func(c *gin.Context) {
-		if _, err := currentUser(c, svc); err != nil {
+		user, err := currentUser(c, svc)
+		if err != nil {
 			failService(c, err)
 			return
 		}
@@ -21,7 +22,7 @@ func RegisterModelCatalogRoutes(r *gin.RouterGroup, svc *service.Service) {
 			fail(c, http.StatusBadRequest, errors.New("模型报价请求格式错误"))
 			return
 		}
-		quote, err := svc.QuoteChannelModel(req)
+		quote, err := svc.QuoteChannelModel(req, user.ID)
 		if err != nil {
 			failService(c, err)
 			return

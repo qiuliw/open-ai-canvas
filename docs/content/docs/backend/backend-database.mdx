@@ -15,7 +15,7 @@ description: 影策后端核心持久化表与状态边界
 
 ## 结构迁移与版本
 
-当前结构版本为 35。版本 35 `auth_notifications` 为认证通知与组合验证补齐 `auth_verifications`、`notification_quotas`、`sms_channels`、`sms_records` 四张表，并为 `users` 增加 `phone`、`email_verified_at`、`phone_verified_at`，为 `email_verification_codes` 增加 `attempts`；同时创建非空手机号唯一索引。版本 34 `task_media_recovery` 为 `tasks` 增加 `media_recovery_json`（text）和 `media_stage`（最长 24 字）。版本 33 `oauth_state_accepted_terms` 为 `o_auth_states` 增加非空布尔列 `accepted_terms`，默认 `false`，不替历史流程补造同意记录。升级前备份，按既有流程执行 `migrate-schema up` 和 `verify` 后再启动新后端。旧版本二进制不支持版本 35，回退需恢复匹配的数据库备份。关闭自动迁移的生产环境必须运行正式的 v35 migration；仅在数据库中手工补表不能更新 `schema_migrations` 的版本与校验和记录。
+当前结构版本为 36。版本 36 `discount_groups` 新增 `discount_groups` 表，并为 `users` 增加可空 `discount_group_id`，用于管理员配置用户折扣倍率并分配给账号；删除分组时会清空用户分配，历史账单倍率快照不受影响。版本 35 `auth_notifications` 为认证通知与组合验证补齐 `auth_verifications`、`notification_quotas`、`sms_channels`、`sms_records` 四张表，并为 `users` 增加 `phone`、`email_verified_at`、`phone_verified_at`，为 `email_verification_codes` 增加 `attempts`；同时创建非空手机号唯一索引。版本 34 `task_media_recovery` 为 `tasks` 增加 `media_recovery_json`（text）和 `media_stage`（最长 24 字）。版本 33 `oauth_state_accepted_terms` 为 `o_auth_states` 增加非空布尔列 `accepted_terms`，默认 `false`，不替历史流程补造同意记录。升级前备份，按既有流程执行 `migrate-schema up` 和 `verify` 后再启动新后端。旧版本二进制不支持版本 36，回退需恢复匹配的数据库备份。关闭自动迁移的生产环境必须运行正式的 v36 migration；仅在数据库中手工补表不能更新 `schema_migrations` 的版本与校验和记录。
 
 ### 生成成功后的作品保存恢复
 
@@ -113,7 +113,15 @@ docker compose -f docker-compose.deploy.yml up -d backend web
 
 | 表 | 用途 | 关键边界 |
 | --- | --- | --- |
-| `users` | 保存用户名、唯一非空邮箱、本地密码哈希、角色和状态 | 密码只保存 bcrypt 哈希；密码找回只面向状态正常且已有本地密码的账号 |
+| `users` | 保存用户名、唯一非空邮箱、本地密码哈希、角色、状态和可选折扣分组 | 密码只保存 bcrypt 哈希；密码找回只面向状态正常且已有本地密码的账号；`discount_group_id` 可空，删除分组时清空 |
+
+## 积分折扣分组
+
+| 表 | 用途 | 关键边界 |
+| --- | --- | --- |
+| `discount_groups` | 保存管理员配置的折扣分组名称、默认倍率、分模型倍率和启用状态 | 倍率与全局积分策略相同，使用万分比；仅启用分组参与新账单倍率解析；删除时同步清空用户分配，不回算历史账单 |
+
+计费解析：先取全局积分策略（模型覆盖 → 默认），再与启用中的用户倍率分组相乘叠加。账单仍快照 `multiplier_basis_points`，策略或分组变更只影响后续订单。
 | `auth_sessions` | 保存登录 Cookie 对应的服务端会话和令牌哈希 | 密码重置成功时删除该用户全部会话，旧 Cookie 立即失效 |
 | `o_auth_states` | 保存一次性 OAuth state、PKCE verifier、跳转路径和本次 `accepted_terms` 标志 | 有效期 10 分钟且只能消费一次；仅新建第三方账号时要求同意，已有账号登录不受该标志影响；不是长期协议签署记录 |
 | `email_verification_codes` | 保存注册和密码重置的一次性邮箱验证码 | 只保存带用途隔离的 HMAC 哈希；验证码 10 分钟过期、只能消费一次，明文不进入数据库 |

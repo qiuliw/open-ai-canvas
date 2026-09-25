@@ -250,6 +250,7 @@ func migrations() []tableMigration {
 		migrateTable[model.PaymentReconciliationItem]("payment_reconciliation_items"),
 		migrateTable[model.RedeemBatch]("redeem_batches"),
 		migrateTable[model.RedeemCode]("redeem_codes"),
+		migrateTable[model.DiscountGroup]("discount_groups"),
 		migrateTable[model.AdminAuditEvent]("admin_audit_events"),
 		migrateTable[model.UserDailyActivity]("user_daily_activities"),
 		migrateTable[model.SystemSetting]("system_settings"),

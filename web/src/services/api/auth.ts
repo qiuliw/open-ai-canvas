@@ -29,6 +29,7 @@ export type LocalUser = {
     identityUsername?: string;
     role: "admin" | "user";
     status: "active" | "disabled";
+    discountGroupId?: string | null;
     lastLoginAt?: string;
     createdAt: string;
     updatedAt: string;
@@ -37,6 +38,7 @@ export type LocalUser = {
 export type AdminUser = LocalUser & {
     availableMicrocredits: number;
     reservedMicrocredits: number;
+    discountGroupName?: string;
 };
 
 export type AuthSessionPayload = {
@@ -164,6 +166,7 @@ export type AnalyticsFilters = {
 export type AdminReferenceData = {
     users: Array<{ id: string; username: string; displayName: string }>;
     channels: Array<{ id: string; name: string; enabled: boolean; models: string[]; modelDisplayNames?: string[] }>;
+    discountGroups: Array<{ id: string; name: string; enabled: boolean }>;
 };
 
 export type AnalyticsFinance = {
@@ -479,7 +482,7 @@ export function listAdminUserAuditEvents(id: string, params: { page?: number; pa
     return http.get<{ events: AdminAuditEvent[]; total: number; page: number; pageSize: number }>(`/admin/users/${encodeURIComponent(id)}/audit-events`, { params });
 }
 
-export function updateAdminUser(id: string, input: Partial<Pick<LocalUser, "displayName" | "email" | "role" | "status">> & { password?: string }) {
+export function updateAdminUser(id: string, input: Partial<Pick<LocalUser, "displayName" | "email" | "role" | "status" | "discountGroupId">> & { password?: string }) {
     return http.patch<{ user: LocalUser }>(`/admin/users/${encodeURIComponent(id)}`, input);
 }
 

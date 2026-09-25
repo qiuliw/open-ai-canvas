@@ -6,12 +6,13 @@ import { IdentityProviderBadge } from "@/components/layout/identity-provider-bad
 import { AdminRowActions, AdminStatusBadge } from "../components/admin-ui";
 import type { AdminUser } from "@/services/api/auth";
 
-export type UserColumnKey = "user" | "email" | "credits" | "role" | "status" | "createdAt" | "actions";
+export type UserColumnKey = "user" | "email" | "credits" | "discountGroup" | "role" | "status" | "createdAt" | "actions";
 
 export const userColumnOptions: Array<{ key: UserColumnKey; label: string; locked?: boolean }> = [
     { key: "user", label: "用户", locked: true },
     { key: "email", label: "邮箱" },
     { key: "credits", label: "当前积分" },
+    { key: "discountGroup", label: "倍率分组" },
     { key: "role", label: "角色" },
     { key: "status", label: "状态" },
     { key: "createdAt", label: "注册时间" },
@@ -51,6 +52,14 @@ export function createUserColumns({
             width: 130,
             align: "center",
             render: (value, user) => <span className="tabular-nums" title={`冻结积分：${formatCredits(user.reservedMicrocredits)}`}>{formatCredits(value)}</span>,
+        },
+        {
+            key: "discountGroup",
+            title: "倍率分组",
+            dataIndex: "discountGroupName",
+            width: 140,
+            align: "center",
+            render: (name, user) => name || (user.discountGroupId ? <span className="text-foreground/40">未知分组</span> : <span className="text-foreground/40">未分配</span>),
         },
         { key: "role", title: "角色", dataIndex: "role", width: 110, align: "center", render: (role) => <AdminStatusBadge label={role === "admin" ? "管理员" : "普通用户"} tone={role === "admin" ? "info" : "neutral"} /> },
         { key: "status", title: "状态", dataIndex: "status", width: 110, align: "center", render: (status) => <AdminStatusBadge label={status === "active" ? "已启用" : "已停用"} tone={status === "active" ? "success" : "neutral"} /> },

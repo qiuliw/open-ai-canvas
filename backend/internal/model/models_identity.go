@@ -12,6 +12,8 @@ type User struct {
 	DisplayName     string     `json:"displayName" gorm:"size:80"`
 	Role            UserRole   `json:"role" gorm:"index;size:24"`
 	Status          UserStatus `json:"status" gorm:"index;size:24"`
+	// DiscountGroupID 指向折扣分组；空表示走全局积分策略倍率。
+	DiscountGroupID *string    `json:"discountGroupId,omitempty" gorm:"index;size:36"`
 	PasswordHash    string     `json:"-"`
 	LastLoginAt     *time.Time `json:"lastLoginAt"`
 	CreatedAt       time.Time  `json:"createdAt"`

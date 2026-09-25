@@ -5,7 +5,7 @@ import UsersPanel from "./users-panel";
 export default function UsersPage() {
     const { updateUserReference } = useAdminContext();
     return (
-        <AdminPageFrame title="用户管理" description="账号、角色与状态">
+        <AdminPageFrame title="用户管理" description="账号、角色、倍率分组与状态">
             <UsersPanel onUserChanged={updateUserReference} />
         </AdminPageFrame>
     );

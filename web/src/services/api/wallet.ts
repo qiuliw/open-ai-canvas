@@ -47,6 +47,26 @@ export type CreditPolicy = {
     modelMultiplierBasisPoints: Record<string, number>;
 };
 
+export type DiscountGroup = {
+    id: string;
+    name: string;
+    description: string;
+    defaultMultiplierBasisPoints: number;
+    modelMultiplierBasisPoints: Record<string, number>;
+    enabled: boolean;
+    memberCount?: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type DiscountGroupInput = {
+    name: string;
+    description?: string;
+    defaultMultiplierBasisPoints: number;
+    modelMultiplierBasisPoints: Record<string, number>;
+    enabled?: boolean;
+};
+
 export type ChannelModel = {
     id: string;
     channelId: string;
@@ -262,6 +282,22 @@ export function getAdminCreditPolicy() {
 
 export function updateAdminCreditPolicy(policy: CreditPolicy) {
     return http.patch<{ policy: CreditPolicy }>("/admin/settings/credits", policy);
+}
+
+export function listAdminDiscountGroups(params: { keyword?: string; status?: string; page?: number; pageSize?: number } = {}) {
+    return http.get<{ groups: DiscountGroup[]; total: number; page: number; pageSize: number }>("/admin/discount-groups", { params });
+}
+
+export function createAdminDiscountGroup(input: DiscountGroupInput) {
+    return http.post<{ group: DiscountGroup }>("/admin/discount-groups", input);
+}
+
+export function updateAdminDiscountGroup(id: string, input: DiscountGroupInput) {
+    return http.patch<{ group: DiscountGroup }>(`/admin/discount-groups/${encodeURIComponent(id)}`, input);
+}
+
+export function deleteAdminDiscountGroup(id: string) {
+    return http.delete<{ ok: boolean }>(`/admin/discount-groups/${encodeURIComponent(id)}`);
 }
 
 export function getAdminLinuxDOSetting() {

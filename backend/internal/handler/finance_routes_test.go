@@ -44,3 +44,26 @@ func TestFinanceRoutesExposeChannelModelBatchReprice(t *testing.T) {
 		t.Fatalf("unauthenticated status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
+
+func TestFinanceRoutesExposeDiscountGroups(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterFinanceRoutes(router.Group("/api"), &service.Service{})
+	wanted := map[string]bool{
+		"GET /api/admin/discount-groups":        false,
+		"POST /api/admin/discount-groups":       false,
+		"PATCH /api/admin/discount-groups/:id":  false,
+		"DELETE /api/admin/discount-groups/:id": false,
+	}
+	for _, route := range router.Routes() {
+		key := route.Method + " " + route.Path
+		if _, ok := wanted[key]; ok {
+			wanted[key] = true
+		}
+	}
+	for key, found := range wanted {
+		if !found {
+			t.Fatalf("route %s is not registered", key)
+		}
+	}
+}

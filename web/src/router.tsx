@@ -196,6 +196,7 @@ export const router = createBrowserRouter([
                     { path: "agent-lessons", element: <AgentLessonsPage /> },
                     { path: "resources", element: <StorageResourcesPage /> },
                     { path: "credit-operations", element: <CreditOperationsPage /> },
+                    { path: "discount-groups", element: <Navigate to="/admin/credit-operations" replace /> },
                     { path: "redemption-codes", element: <RedemptionCodesPage /> },
                     { path: "logs", element: <LogsPage /> },
                     { path: "settings", element: <Navigate to="runtime-policy" replace /> },

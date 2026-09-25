@@ -4,16 +4,18 @@ import { useEffect, useState } from "react";
 
 import { createAdminUser, updateAdminUser, type AdminUser, type LocalUser } from "@/services/api/auth";
 
-type UserFormValues = Pick<LocalUser, "displayName" | "email" | "role" | "status">;
+type UserFormValues = Pick<LocalUser, "displayName" | "email" | "role" | "status"> & { discountGroupId?: string };
 
 export function AdminUserEditDrawer({
     user,
     actorId,
+    discountGroups = [],
     onClose,
     onSaved,
 }: {
     user: AdminUser | null;
     actorId?: string;
+    discountGroups?: Array<{ id: string; name: string; enabled: boolean }>;
     onClose: () => void;
     onSaved: (user: LocalUser) => void;
 }) {
@@ -30,6 +32,7 @@ export function AdminUserEditDrawer({
             email: user.email || "",
             role: user.role,
             status: user.status,
+            discountGroupId: user.discountGroupId || "",
         });
     }, [form, user]);
 
@@ -41,7 +44,7 @@ export function AdminUserEditDrawer({
         }
         modal.confirm({
             title: "放弃用户修改？",
-            content: "尚未保存的账号、角色或状态修改将丢失。",
+            content: "尚未保存的账号、角色、状态或折扣分组修改将丢失。",
             okText: "放弃修改",
             cancelText: "继续编辑",
             okButtonProps: { danger: true },
@@ -59,6 +62,7 @@ export function AdminUserEditDrawer({
                 email: values.email?.trim() || "",
                 role: values.role,
                 status: values.status,
+                discountGroupId: values.discountGroupId || "",
             });
             onSaved(result.user);
             form.resetFields();
@@ -96,6 +100,16 @@ export function AdminUserEditDrawer({
                 </Form.Item>
                 <Form.Item name="status" label="账号状态" extra={editingSelf ? "不能停用当前登录账号。" : "停用后会清除登录态，但保留身份、任务和积分流水。"}>
                     <Select disabled={editingSelf} options={[{ label: "已启用", value: "active" }, { label: "已停用", value: "disabled" }]} />
+                </Form.Item>
+                <Form.Item name="discountGroupId" label="用户倍率分组" extra="启用中的分组会与全局折扣策略倍率相乘叠加，仅影响后续新订单。">
+                    <Select
+                        allowClear
+                        placeholder="不使用用户倍率分组"
+                        options={discountGroups.map((group) => ({
+                            label: group.enabled ? group.name : `${group.name}（已停用）`,
+                            value: group.id,
+                        }))}
+                    />
                 </Form.Item>
             </Form>
         </Drawer>
