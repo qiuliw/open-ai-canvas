@@ -474,9 +474,9 @@ add({
   baseUrl: "https://ark.cn-beijing.volces.com", auth: bearer, params: arkSeedanceParams, requiresPublicMediaUrls: true,
   validations: arkSeedanceValidations,
   notes: "官方 Ark 推理接入：创建/查询/取消走 /api/v3/contents/generations/tasks；插件不根据图片下标推断首尾帧，role 由业务层确定。API Key 来自方舟推理接入控制台。",
-  create: jsonCreate("/api/v3/contents/generations/tasks", arkSeedanceBody("volcengine-ark-video")),
-  poll: { method: "GET", path: "/api/v3/contents/generations/tasks/{{taskId}}" },
-  cancel: { method: "DELETE", path: "/api/v3/contents/generations/tasks/{{taskId}}" },
+  create: jsonCreate("/contents/generations/tasks", arkSeedanceBody("volcengine-ark-video")),
+  poll: { method: "GET", path: "/contents/generations/tasks/{{taskId}}" },
+  cancel: { method: "DELETE", path: "/contents/generations/tasks/{{taskId}}" },
   response: arkSeedanceResponse
 });
 
