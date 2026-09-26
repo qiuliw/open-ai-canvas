@@ -986,7 +986,7 @@ func (s *Service) enrichAPICallLogFailureSummary(log *model.ApiCallLog, response
 	if log.Status != model.ApiCallStatusFailed || log.StatusCode < 400 {
 		return
 	}
-	userMessage := providerUserFacingErrorMessage(providerHTTPError{
+	userMessage := providerUserFacingErrorMessage(providerFailure{
 		StatusCode: log.StatusCode,
 		Body:       string(responseBody),
 	})

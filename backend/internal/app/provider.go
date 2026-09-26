@@ -132,20 +132,16 @@ type providerError struct {
 	Message string `json:"message"`
 }
 
-// providerPayloadError 在进程内保留上游原始原因，供协议兼容分支做机器判断；
-// 对调用方只暴露经过过滤的错误原因。Provider 正文可能包含密钥或内部诊断，
-// 禁止原样进入用户错误和日志。
-type providerPayloadError struct {
-	raw     string
-	message string
-}
-
-func (e providerPayloadError) Error() string { return e.message }
-
-type providerHTTPError struct {
+// providerFailure 是上游失败的唯一类型：重试、调用日志、用户文案都只消费它。
+// Pending 表示任务尚未就绪（继续查询原任务），不是终态失败。
+type providerFailure struct {
 	StatusCode int
 	Status     string
 	Body       string
+	Code       string
+	Message    string
+	Pending    bool
+	TaskID     string
 	RetryAfter time.Duration
 }
 
@@ -162,17 +158,6 @@ func (providerCircuitOpenError) Error() string {
 	return "当前渠道连续失败，已暂时熔断，请稍后重试"
 }
 
-type providerStatePendingError struct {
-	TaskID string
-	Cause  error
-}
-
-func (e providerStatePendingError) Error() string {
-	return fmt.Sprintf("上游任务状态尚未同步，将继续查询原任务（任务 %s）", e.TaskID)
-}
-
-func (e providerStatePendingError) Unwrap() error { return e.Cause }
-
 type providerAnalyticsKey struct{}
 
 type providerAnalyticsContext struct {
@@ -187,6 +172,7 @@ type providerAnalyticsContext struct {
 	Capability        string
 	Operation         string
 	ChannelID         string
+	InterfaceType     string
 	Model             string
 	VideoSeconds      int
 	RequestKind       string
@@ -211,6 +197,7 @@ func withProviderAnalytics(ctx context.Context, service *Service, task model.Tas
 	}
 	if json.Unmarshal([]byte(task.InputJSON), &input) == nil {
 		metadata.ChannelID = firstNonEmpty(input.Config.ChannelID, systemChannelIDFromBaseURL(input.Config.BaseURL))
+		metadata.InterfaceType = strings.TrimSpace(input.Config.InterfaceType)
 		metadata.Model = firstNonEmpty(input.Config.ChannelModelKey, input.Config.Model, metadata.Model)
 		metadata.VideoSeconds, _ = strconv.Atoi(input.Config.VideoSeconds)
 		if normalized := normalizeCapability(input.Mode); normalized != "" {
@@ -234,17 +221,26 @@ func withProviderRequestKind(ctx context.Context, requestKind string) context.Co
 	return context.WithValue(ctx, providerAnalyticsKey{}, metadata)
 }
 
-func (e providerHTTPError) Error() string {
-	if e.StatusCode == http.StatusBadRequest || e.StatusCode == http.StatusUnprocessableEntity {
-		return providerErrorWithDetail(e.summary(), e.Body)
+func (e providerFailure) Error() string {
+	if e.Pending {
+		return fmt.Sprintf("上游任务状态尚未同步，将继续查询原任务（任务 %s）", e.TaskID)
 	}
-	return appendProviderErrorDetail(e.summary(), e.Body)
+	body := e.Body
+	if body == "" && e.Message != "" {
+		body = e.Message
+	}
+	if e.StatusCode == http.StatusBadRequest || e.StatusCode == http.StatusUnprocessableEntity || e.StatusCode == 0 {
+		return providerErrorWithDetail(e.summary(), body)
+	}
+	return appendProviderErrorDetail(e.summary(), body)
 }
 
-func (e providerHTTPError) summary() string {
+func (e providerFailure) summary() string {
 	switch e.StatusCode {
 	case 524:
 		return "上游网关超时（524）：模型请求可能仍在服务端执行并产生费用，请勿立即重试，请先到供应商后台核对任务或账单"
+	case 0:
+		return "模型服务返回失败，请检查请求内容或渠道配置"
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return "模型服务拒绝了请求，请检查模型和参数"
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -276,9 +272,9 @@ func providerUserFacingErrorMessage(err error) string {
 	if errors.As(err, &appErr) && strings.TrimSpace(appErr.Message) != "" {
 		return appErr.Message
 	}
-	var httpErr providerHTTPError
-	if errors.As(err, &httpErr) {
-		return httpErr.Error()
+	var failure providerFailure
+	if errors.As(err, &failure) {
+		return failure.Error()
 	}
 	return "连接模型服务失败，请检查渠道地址和网络"
 }

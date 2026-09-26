@@ -48,15 +48,29 @@ type ManifestResponse struct {
 	// BinaryPayload 表示 create 同步返回二进制媒体（如 /audio/speech 的音频流）。
 	// 声明式解析会把整个响应体包装为对应能力的单个媒体结果，不做 JSON 路径提取。
 	BinaryPayload bool `json:"binaryPayload,omitempty"`
-	TaskID        any  `json:"taskId,omitempty"`
-	Status        any  `json:"status,omitempty"`
-	Message       any  `json:"message,omitempty"`
-	Text          any  `json:"text,omitempty"`
-	Reasoning     any  `json:"reasoning,omitempty"`
-	Images        any  `json:"images,omitempty"`
-	Videos        any  `json:"videos,omitempty"`
-	Audios        any  `json:"audios,omitempty"`
-	Usage         any  `json:"usage,omitempty"`
+	// StatusCodeMapping remaps upstream HTTP status codes before host retry
+	// classification, e.g. {"400":503}. Values may be numbers or numeric strings.
+	StatusCodeMapping map[string]any `json:"statusCodeMapping,omitempty"`
+	// HTTPErrors lets the plugin classify selected non-2xx bodies (for example
+	// task_not_exist on 400) as pending instead of hard failure.
+	HTTPErrors []ManifestHTTPErrorRule `json:"httpErrors,omitempty"`
+	TaskID     any                     `json:"taskId,omitempty"`
+	Status     any                     `json:"status,omitempty"`
+	Message    any                     `json:"message,omitempty"`
+	Text       any                     `json:"text,omitempty"`
+	Reasoning  any                     `json:"reasoning,omitempty"`
+	Images     any                     `json:"images,omitempty"`
+	Videos     any                     `json:"videos,omitempty"`
+	Audios     any                     `json:"audios,omitempty"`
+	Usage      any                     `json:"usage,omitempty"`
+}
+
+// ManifestHTTPErrorRule matches a non-2xx response and maps it to a protocol status.
+type ManifestHTTPErrorRule struct {
+	StatusCodes []int    `json:"statusCodes,omitempty"`
+	MatchPaths  []string `json:"matchPaths,omitempty"`
+	Equals      []string `json:"equals,omitempty"`
+	Status      string   `json:"status"` // pending | processing | failed
 }
 
 // ManifestAgentResponse describes the provider response shape for a
@@ -175,6 +189,13 @@ func (a metadataAdapter) BuildCreate(ctx context.Context, c RequestContext) (Req
 }
 func (a metadataAdapter) ParseCreate(ctx context.Context, body []byte) (CreateResult, error) {
 	return a.delegate.ParseCreate(ctx, body)
+}
+func (a metadataAdapter) InterpretHTTPError(ctx context.Context, statusCode int, body []byte) (HTTPErrorInterpretation, bool) {
+	adapter, ok := a.delegate.(HTTPErrorAdapter)
+	if !ok {
+		return HTTPErrorInterpretation{}, false
+	}
+	return adapter.InterpretHTTPError(ctx, statusCode, body)
 }
 func (a metadataAdapter) BuildPoll(ctx context.Context, c PollContext) (RequestSpec, error) {
 	return a.delegate.BuildPoll(ctx, c)
@@ -523,6 +544,125 @@ func (a manifestAdapter) ParseCreate(_ context.Context, body []byte) (CreateResu
 		return CreateResult{}, err
 	}
 	return a.parse(payload, PollContext{}), nil
+}
+
+func (a manifestAdapter) InterpretHTTPError(_ context.Context, statusCode int, body []byte) (HTTPErrorInterpretation, bool) {
+	out := HTTPErrorInterpretation{
+		Status:           StatusFailed,
+		MappedStatusCode: mappedHTTPStatusCode(a.manifest.Response.StatusCodeMapping, statusCode),
+	}
+	payload, err := decodeObject(body)
+	if err != nil {
+		return out, out.MappedStatusCode > 0
+	}
+	parsed := a.parse(payload, PollContext{})
+	out.Message = strings.TrimSpace(parsed.Message)
+	out.Code = firstHTTPErrorCode(payload, a.manifest.Response.ErrorPaths...)
+	if rule, ok := matchManifestHTTPErrorRule(a.manifest.Response.HTTPErrors, statusCode, payload, out.Code, out.Message); ok {
+		status := normalizeStatus(rule.Status)
+		if status == "" {
+			status = StatusFailed
+		}
+		out.Status = status
+	}
+	return out, true
+}
+
+func firstHTTPErrorCode(payload map[string]any, paths ...string) string {
+	if code := firstPathValue(payload, paths...); code != "" {
+		return code
+	}
+	for _, path := range paths {
+		value := pathValue(payload, path)
+		switch typed := value.(type) {
+		case float64:
+			if typed != 0 {
+				return strings.TrimSpace(strconv.FormatFloat(typed, 'f', -1, 64))
+			}
+		case json.Number:
+			if text := strings.TrimSpace(typed.String()); text != "" && text != "0" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func mappedHTTPStatusCode(mapping map[string]any, statusCode int) int {
+	if len(mapping) == 0 || statusCode == http.StatusOK {
+		return 0
+	}
+	value, ok := mapping[strconv.Itoa(statusCode)]
+	if !ok {
+		return 0
+	}
+	switch typed := value.(type) {
+	case string:
+		code, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err != nil || code <= 0 {
+			return 0
+		}
+		return code
+	case float64:
+		code := int(typed)
+		if float64(code) != typed || code <= 0 {
+			return 0
+		}
+		return code
+	case json.Number:
+		code, err := typed.Int64()
+		if err != nil || code <= 0 {
+			return 0
+		}
+		return int(code)
+	case int:
+		if typed <= 0 {
+			return 0
+		}
+		return typed
+	default:
+		return 0
+	}
+}
+
+func matchManifestHTTPErrorRule(rules []ManifestHTTPErrorRule, statusCode int, payload map[string]any, code, message string) (ManifestHTTPErrorRule, bool) {
+	for _, rule := range rules {
+		if len(rule.StatusCodes) > 0 && !containsInt(rule.StatusCodes, statusCode) {
+			continue
+		}
+		if len(rule.Equals) == 0 {
+			return rule, true
+		}
+		candidates := []string{code, message}
+		paths := rule.MatchPaths
+		if len(paths) == 0 {
+			paths = []string{"code", "message", "msg", "error.code", "error.message"}
+		}
+		for _, path := range paths {
+			candidates = append(candidates, firstPathValue(payload, path))
+		}
+		for _, candidate := range candidates {
+			normalized := strings.ToLower(strings.TrimSpace(candidate))
+			if normalized == "" {
+				continue
+			}
+			for _, want := range rule.Equals {
+				if normalized == strings.ToLower(strings.TrimSpace(want)) {
+					return rule, true
+				}
+			}
+		}
+	}
+	return ManifestHTTPErrorRule{}, false
+}
+
+func containsInt(values []int, want int) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // binaryPayloadCreateResult 把同步二进制响应包装为单个媒体结果。MIME 以响应内容探测为准，
@@ -1375,6 +1515,34 @@ func manifestError(payload map[string]any, paths ...string) bool {
 		}
 	}
 	return false
+}
+
+// BusinessFailure reports a declarative business failure from plugin errorPaths /
+// messagePaths so call logs stay aligned with ParseCreate/ParsePoll.
+func BusinessFailure(adapter Adapter, body []byte) (code, message string, ok bool) {
+	errorPaths, messagePaths := manifestResponsePaths(adapter)
+	if len(errorPaths) == 0 || len(body) == 0 {
+		return "", "", false
+	}
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil || !manifestError(payload, errorPaths...) {
+		return "", "", false
+	}
+	return firstPathValue(payload, errorPaths...), firstPathValue(payload, messagePaths...), true
+}
+
+func manifestResponsePaths(adapter Adapter) (errorPaths, messagePaths []string) {
+	for adapter != nil {
+		switch typed := adapter.(type) {
+		case metadataAdapter:
+			adapter = typed.delegate
+		case manifestAdapter:
+			return typed.manifest.Response.ErrorPaths, typed.manifest.Response.MessagePaths
+		default:
+			return nil, nil
+		}
+	}
+	return nil, nil
 }
 
 func reflectValueIsZero(value any) bool {

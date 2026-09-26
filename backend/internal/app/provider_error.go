@@ -10,6 +10,24 @@ const contentModerationErrorCode = "sensitive_words_detected"
 
 const contentModerationRetryMessage = "内容审核未通过，请修改提示词后重新生成；原任务不能直接重试"
 
+// enrichProviderFailure fills Code/Message from a JSON error body when present.
+func enrichProviderFailure(err *providerFailure) {
+	if err == nil || strings.TrimSpace(err.Body) == "" {
+		return
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(err.Body), &payload) != nil {
+		return
+	}
+	code, message := providerFailureDetails(payload)
+	if err.Code == "" {
+		err.Code = code
+	}
+	if err.Message == "" {
+		err.Message = message
+	}
+}
+
 // 只提取供应商明确返回的错误码和短消息，避免把完整响应或用户输入复制到调用日志。
 func providerFailureDetails(payload map[string]any) (string, string) {
 	candidates := make([]map[string]any, 0, 3)
@@ -18,7 +36,6 @@ func providerFailureDetails(payload map[string]any) (string, string) {
 			candidates = append(candidates, nested)
 		}
 	}
-	// 内层通常是供应商业务错误，外层 code 可能只是 HTTP 包装码。
 	candidates = append(candidates, payload)
 	code := ""
 	message := ""
@@ -36,55 +53,31 @@ func providerFailureDetails(payload map[string]any) (string, string) {
 	return code, truncateRunes(message, 500)
 }
 
-func providerResponseBusinessFailure(responseBody []byte) (string, string, bool) {
-	if len(responseBody) == 0 {
-		return "", "", false
-	}
-	var payload map[string]any
-	if json.Unmarshal(responseBody, &payload) != nil {
-		return "", "", false
-	}
-	return providerPayloadBusinessFailure(payload)
-}
-
-func providerPayloadBusinessFailure(payload map[string]any) (string, string, bool) {
-	if code, message, failed := providerBusinessFailure(payload); failed {
-		return code, message, true
-	}
-	// DashScope 业务失败在 output 内
-	if output, ok := payload["output"].(map[string]any); ok {
-		return providerBusinessFailure(output)
-	}
-	return "", "", false
-}
-
-func providerBusinessFailure(payload map[string]any) (string, string, bool) {
+// openAICompatibleBusinessFailure recognizes only the generic OpenAI-style
+// error object / top-level code. Vendor-specific nesting belongs in plugin
+// errorPaths via protocol.BusinessFailure.
+func openAICompatibleBusinessFailure(payload map[string]any) (string, string, bool) {
 	if errorValue, ok := payload["error"].(map[string]any); ok {
 		code, message := providerFailureDetails(map[string]any{"error": errorValue})
 		if code != "" || message != "" {
 			return code, message, true
 		}
 	}
-
-	code := strings.ToLower(strings.TrimSpace(fmt.Sprint(payload["code"])))
-	if code != "" && code != "0" &&
-		code != "success" && code != "succeeded" &&
-		code != "ok" && code != "<nil>" {
-		code, message := providerFailureDetails(payload)
-		return code, message, true
+	if !providerBusinessCodeFailed(payload["code"]) {
+		return "", "", false
 	}
+	code, message := providerFailureDetails(payload)
+	return code, message, true
+}
 
-	status := strings.ToLower(strings.TrimSpace(fmt.Sprint(payload["task_status"])))
-	switch status {
-	case "failed", "failure", "error", "expired":
-		code, message := providerFailureDetails(payload)
-		if code == "" {
-			code = "task_failed"
-		}
-		return code, message, true
+func providerBusinessCodeFailed(value any) bool {
+	code := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	switch code {
+	case "", "0", "success", "succeeded", "ok", "<nil>":
+		return false
+	default:
+		return true
 	}
-
-	return "", "", false
 }
 
 func normalizedProviderErrorCode(value any) string {
@@ -116,4 +109,13 @@ func normalizedProviderErrorCode(value any) string {
 
 func isContentModerationFailure(value string) bool {
 	return strings.Contains(strings.ToLower(value), contentModerationErrorCode)
+}
+
+func providerFailureFromMessage(raw string) providerFailure {
+	raw = strings.TrimSpace(raw)
+	return providerFailure{
+		Code:    "",
+		Message: truncateRunes(raw, 500),
+		Body:    raw,
+	}
 }

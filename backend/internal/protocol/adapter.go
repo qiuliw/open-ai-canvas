@@ -13,6 +13,21 @@ type Adapter interface {
 	BuildCancel(context.Context, PollContext) (RequestSpec, error)
 }
 
+// HTTPErrorInterpretation is the plugin view of a non-2xx upstream response.
+// Non-2xx never enters ParseCreate/ParsePoll; plugins interpret failures here.
+type HTTPErrorInterpretation struct {
+	Status           Status // failed (default), pending, processing
+	Code             string
+	Message          string
+	MappedStatusCode int // 0 keeps the original HTTP status
+}
+
+// HTTPErrorAdapter lets a protocol interpret non-2xx bodies and optional status
+// remapping, analogous to new-api RelayErrorHandler + status_code_mapping.
+type HTTPErrorAdapter interface {
+	InterpretHTTPError(ctx context.Context, statusCode int, body []byte) (HTTPErrorInterpretation, bool)
+}
+
 // AgentAdapter is the optional protocol surface for tool-capable text calls.
 // The host still owns credentials, outbound policy and billing; a plugin only
 // maps the platform's agent request into the provider payload and parses the

@@ -69,11 +69,24 @@
 | `response.message` | `{"$coalesce":[{"$ref":"response.error.message"},{"$ref":"response.message"},{"$ref":"response.fail_reason"}]}` |
 | `response.videos` | `{"$coalesce":[{"$map":{"from":{"$ref":"response.data"},"as":"item","in":{"$coalesce":[{"$ref":"item.url"},{"$ref":"item.video_url"},{"$ref":"item.videoUrl"},{"$ref":"item.output_url"},{"$ref":"item.outputUrl"}]}}},{"$ref":"response.data.result_url"},{"$ref":"response.data.video_url"},{"$ref":"response.data.output_url"},{"$ref":"response.data.url"},{"$ref":"response.data.metadata.url"},{"$ref":"response.data.data.video_url"},{"$ref":"response.data.data.output_url"},{"$ref":"response.data.data.result_url"},{"$ref":"response.data.data.url"},{"$ref":"response.data.data.metadata.url"},{"$ref":"response.video_url"},{"$ref":"response.videoUrl"},{"$ref":"response.result_url"},{"$ref":"response.output_url"},{"$ref":"response.url"},{"$ref":"response.metadata.url"},{"$ref":"response.output.url"}]}` |
 | `response.errorPaths[0]` | `"error.code"` |
+| `response.errorPaths[1]` | `"code"` |
+| `response.messagePaths[0]` | `"error.message"` |
+| `response.messagePaths[1]` | `"message"` |
+| `response.messagePaths[2]` | `"msg"` |
+| `response.httpErrors[0]` | `400/404 + task_not_exist|task_not_found → pending` |
 | `response.resultEphemeral` | `true` |
 
 ## 响应与错误
 
-插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。
+插件把上游 task/status/text/media/usage 映射为统一结果。临时媒体 URL 标记为 ephemeral，由宿主立即下载持久化。
+
+非 2xx 不进入 `ParseCreate` / `ParsePoll`，改由插件 `InterpretHTTPError` 解释：
+
+- `errorPaths` / `messagePaths` 提取错误码与文案；
+- `httpErrors` 可把指定状态码 + 精确错误码（如 `task_not_exist`）标成 `pending`，宿主继续查询原任务；
+- `statusCodeMapping` 可把失败态的上游状态码改写后再交给宿主重试分类（例如 `{"429":503}`）。
+
+其余 HTTP 错误、业务 code 和 error object 保持失败语义，不包装成成功。
 
 ## 兼容边界
 
@@ -426,7 +439,28 @@
             ]
           },
           "errorPaths": [
-            "error.code"
+            "error.code",
+            "code"
+          ],
+          "messagePaths": [
+            "error.message",
+            "message",
+            "msg"
+          ],
+          "httpErrors": [
+            {
+              "statusCodes": [
+                400,
+                404
+              ],
+              "equals": [
+                "task_not_exist",
+                "task_not_found",
+                "task not exist",
+                "task not found"
+              ],
+              "status": "pending"
+            }
           ],
           "resultEphemeral": true
         }

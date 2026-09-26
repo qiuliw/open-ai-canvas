@@ -53,7 +53,7 @@ func (s *Service) ensureFailedProviderAttemptLogged(task model.Task, taskErr err
 	path := "/task/provider-preflight"
 	errorCode := "request_not_sent"
 	statusCode := 0
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if errors.As(taskErr, &httpErr) {
 		path = "/task/provider-request"
 		errorCode = "provider_request_unlogged"

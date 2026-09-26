@@ -590,7 +590,7 @@ func TestDeclarativeNewAPIChannel2TaskNotExistExhaustion(t *testing.T) {
 	config := providerConfig{BaseURL: server.URL + "/v1", APIKey: "key", Model: "video-model", InterfaceType: "newapi-channel-2"}
 	ctx := context.Background()
 	_, err := runProtocolAdapterTaskWithPolicy(ctx, canvasGenerationInput{Mode: "video", Prompt: "a clip", Config: config}, adapter, fastVideoPollPolicy())
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("error = %#v, want provider HTTP error", err)
 	}
@@ -653,26 +653,26 @@ func TestDeclarativeMiniMaxFailureReachesTaskError(t *testing.T) {
 	}
 }
 
-func TestProviderTaskNotReadyStrictClassification(t *testing.T) {
-	tests := []struct {
-		name string
-		err  providerHTTPError
-		want bool
-	}{
-		{name: "error code", err: providerHTTPError{StatusCode: 400, Body: `{"code":"task_not_exist"}`}, want: true},
-		{name: "error message", err: providerHTTPError{StatusCode: 400, Body: `{"message":"task_not_exist"}`}, want: true},
-		{name: "not found spelling", err: providerHTTPError{StatusCode: 404, Body: `{"code":"task_not_found"}`}, want: true},
-		{name: "other status", err: providerHTTPError{StatusCode: 502, Body: `{"code":"task_not_exist"}`}},
-		{name: "unstructured body", err: providerHTTPError{StatusCode: 400, Body: "task_not_exist"}},
-		{name: "partial match", err: providerHTTPError{StatusCode: 400, Body: `{"code":"task_not_exist_later"}`}},
-		{name: "other provider error", err: providerHTTPError{StatusCode: 400, Body: `{"code":"invalid_parameter"}`}},
+func TestDeclarativeHTTPErrorInterpretation(t *testing.T) {
+	adapter := newDeclarativeNewAPIChannel2TestAdapter(t)
+	interpreter, ok := adapter.(protocol.HTTPErrorAdapter)
+	if !ok {
+		t.Fatal("declarative adapter must interpret HTTP errors")
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := isProviderTaskNotReadyError(test.err); got != test.want {
-				t.Fatalf("isProviderTaskNotReadyError() = %v, want %v", got, test.want)
-			}
-		})
+
+	pending, handled := interpreter.InterpretHTTPError(context.Background(), http.StatusBadRequest, []byte(`{"code":"task_not_exist","message":"task_not_exist"}`))
+	if !handled || pending.Status != protocol.StatusPending || pending.Code != "task_not_exist" {
+		t.Fatalf("pending interpretation = %#v handled=%v", pending, handled)
+	}
+
+	failed, handled := interpreter.InterpretHTTPError(context.Background(), http.StatusBadRequest, []byte(`{"code":"invalid_parameter","message":"bad size"}`))
+	if !handled || failed.Status != protocol.StatusFailed || failed.Message != "bad size" {
+		t.Fatalf("failed interpretation = %#v handled=%v", failed, handled)
+	}
+
+	mapped, handled := interpreter.InterpretHTTPError(context.Background(), http.StatusBadRequest, []byte(`{"code":"upstream_busy"}`))
+	if !handled || mapped.MappedStatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("mapped interpretation = %#v handled=%v", mapped, handled)
 	}
 }
 
@@ -681,7 +681,7 @@ func newDeclarativeNewAPIChannel2TestAdapter(t *testing.T) protocol.Adapter {
 	adapter, err := protocol.LoadManifest([]byte(`{
 		"apiVersion":"yingce.plugin/v1",
 		"id":"newapi-channel-2","version":"1.0.0","name":"NewAPI Channel 2","author":"Test","documentation":"# Test",
-		"contributes":{"providers":[{"id":"newapi-channel-2","label":"NewAPI Channel 2","capabilities":["video"],"scopes":["canvas"],"create":{"method":"POST","path":"/video/generations","fields":{"model":"request.model"}},"poll":{"method":"GET","path":"/video/generations/{{taskId}}"},"response":{"taskIdPaths":["id"],"statusPaths":["status"],"resultPaths":["video_url"],"resultKind":"video"}}]}
+		"contributes":{"providers":[{"id":"newapi-channel-2","label":"NewAPI Channel 2","capabilities":["video"],"scopes":["canvas"],"create":{"method":"POST","path":"/video/generations","fields":{"model":"request.model"}},"poll":{"method":"GET","path":"/video/generations/{{taskId}}"},"response":{"taskIdPaths":["id"],"statusPaths":["status"],"resultPaths":["video_url"],"resultKind":"video","errorPaths":["code","error.code"],"messagePaths":["message","error.message","msg"],"statusCodeMapping":{"400":503},"httpErrors":[{"statusCodes":[400,404],"equals":["task_not_exist","task_not_found","task not exist","task not found"],"status":"pending"}]}}]}
 	}`))
 	if err != nil {
 		t.Fatal(err)

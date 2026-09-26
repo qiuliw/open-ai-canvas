@@ -365,7 +365,7 @@ func geminiRequestUsesCachedContent(spec protocol.RequestSpec) bool {
 }
 
 func isGeminiCachedContentNotFound(err error, resourceName string) bool {
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != 404 {
 		return false
 	}

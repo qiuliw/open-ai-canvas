@@ -22,6 +22,7 @@ import (
 
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/platform"
+	"infinite-canvas/backend/internal/protocol"
 )
 
 func postGeminiJSON(ctx context.Context, config providerConfig, path string, body interface{}, target interface{}) error {
@@ -54,7 +55,7 @@ func deleteGeminiCachedContent(ctx context.Context, config providerConfig, resou
 	if err == nil {
 		return nil
 	}
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
 		return nil
 	}
@@ -217,19 +218,20 @@ func doJSON(req *http.Request, target interface{}) error {
 	}
 	if payload, ok := target.(*imageResponse); ok {
 		if payload.Error != nil && payload.Error.Message != "" {
-			return errors.New(providerPayloadErrorMessage(payload.Error.Message))
+			return providerFailureFromMessage(payload.Error.Message)
 		}
 		if payload.Code != nil && *payload.Code != 0 {
-			return errors.New(providerPayloadErrorMessage(payload.Msg))
+			return providerFailureFromMessage(payload.Msg)
 		}
 	}
 	if payload, ok := target.(*map[string]interface{}); ok {
-		if _, rawMessage, failed := providerPayloadBusinessFailure(*payload); failed {
-			return providerPayloadError{raw: rawMessage, message: providerPayloadErrorMessage(rawMessage)}
-		}
-		if errValue, ok := (*payload)["error"].(map[string]interface{}); ok && stringField(errValue, "message") != "" {
-			rawMessage := stringField(errValue, "message")
-			return providerPayloadError{raw: rawMessage, message: providerPayloadErrorMessage(rawMessage)}
+		if code, message, failed := resolveBusinessFailure(req.Context(), *payload, nil); failed {
+			body, _ := json.Marshal(*payload)
+			failure := providerFailure{Code: code, Message: message, Body: string(body)}
+			if failure.Message == "" {
+				failure.Message = message
+			}
+			return failure
 		}
 	}
 	return nil
@@ -348,7 +350,8 @@ func doBinaryWithConsumer(req *http.Request, onChunk func(string, []byte)) ([]by
 		if runtimeService != nil && !cacheManagementRequest {
 			_ = runtimeService.RecordChannelResult(req.Context(), channelID, resp.StatusCode >= 500)
 		}
-		httpErr := providerHTTPError{StatusCode: resp.StatusCode, Status: resp.Status, Body: string(data), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		httpErr := providerFailure{StatusCode: resp.StatusCode, Status: resp.Status, Body: string(data), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		enrichProviderFailure(&httpErr)
 		recordProviderRequest(req, startedAt, resp.StatusCode, data, httpErr)
 		return nil, "", httpErr
 	}
@@ -392,6 +395,33 @@ func providerPollingDeadline(ctx context.Context) time.Time {
 	return time.Now().Add(videoPollTimeout)
 }
 
+func protocolBusinessFailure(ctx context.Context, metadata providerAnalyticsContext, body []byte) (string, string, bool) {
+	id := strings.TrimSpace(metadata.InterfaceType)
+	if id == "" {
+		return "", "", false
+	}
+	var adapter protocol.Adapter
+	if metadata.Service != nil {
+		adapter, _ = metadata.Service.protocolRegistry().Resolve(id)
+	}
+	if adapter == nil {
+		adapter, _ = protocolAdapterForContext(ctx, id)
+	}
+	return protocol.BusinessFailure(adapter, body)
+}
+
+// resolveBusinessFailure prefers declarative plugin paths, then OpenAI-compatible shapes.
+func resolveBusinessFailure(ctx context.Context, payload map[string]any, body []byte) (string, string, bool) {
+	metadata, _ := ctx.Value(providerAnalyticsKey{}).(providerAnalyticsContext)
+	if len(body) == 0 {
+		body, _ = json.Marshal(payload)
+	}
+	if code, message, ok := protocolBusinessFailure(ctx, metadata, body); ok {
+		return code, message, true
+	}
+	return openAICompatibleBusinessFailure(payload)
+}
+
 func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode int, responseBody []byte, requestErr error) {
 	metadata, ok := req.Context().Value(providerAnalyticsKey{}).(providerAnalyticsContext)
 	if !ok || metadata.Service == nil {
@@ -403,7 +433,7 @@ func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode in
 	if requestErr != nil || statusCode < 200 || statusCode >= 300 {
 		status = model.ApiCallStatusFailed
 		errorCode, errorText = providerRequestErrorDetails(requestErr)
-	} else if businessCode, businessMessage, failed := providerResponseBusinessFailure(responseBody); failed {
+	} else if businessCode, businessMessage, failed := resolveBusinessFailureFromBody(req.Context(), responseBody); failed {
 		status = model.ApiCallStatusFailed
 		errorCode = businessCode
 		errorText = businessMessage
@@ -455,6 +485,17 @@ func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode in
 	}
 }
 
+func resolveBusinessFailureFromBody(ctx context.Context, body []byte) (string, string, bool) {
+	if len(body) == 0 {
+		return "", "", false
+	}
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) != nil {
+		return "", "", false
+	}
+	return resolveBusinessFailure(ctx, payload, body)
+}
+
 func providerRequestIsBillable(method, requestKind string) bool {
 	if method != http.MethodPost {
 		return false
@@ -477,13 +518,30 @@ func providerRequestErrorDetails(err error) (string, string) {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "upstream_timeout", "等待上游响应超时"
 	}
+	var failure providerFailure
+	if errors.As(err, &failure) {
+		code := strings.TrimSpace(failure.Code)
+		text := strings.TrimSpace(failure.Message)
+		if text == "" {
+			text = safeProviderLogError(err)
+		}
+		if code == "" && failure.StatusCode > 0 {
+			code = fmt.Sprintf("http_%d", failure.StatusCode)
+		}
+		return code, truncateRunes(text, 500)
+	}
 	return "", safeProviderLogError(err)
 }
 
 func safeProviderLogError(err error) string {
-	var httpErr providerHTTPError
-	if errors.As(err, &httpErr) {
-		return fmt.Sprintf("上游 HTTP %d", httpErr.StatusCode)
+	var failure providerFailure
+	if errors.As(err, &failure) {
+		if failure.StatusCode > 0 {
+			return fmt.Sprintf("上游 HTTP %d", failure.StatusCode)
+		}
+		if strings.TrimSpace(failure.Message) != "" {
+			return truncateRunes(failure.Message, 500)
+		}
 	}
 	return truncateRunes(err.Error(), 500)
 }

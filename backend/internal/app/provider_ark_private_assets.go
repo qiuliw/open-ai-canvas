@@ -404,7 +404,7 @@ func callArkPrivateAssetAPI(ctx context.Context, setting arkPrivateAssetSettingV
 	if err := doJSON(credentials.Sign(req), &response); err != nil {
 		// doJSON 对非 2xx 响应只按状态码生成通用提示（401/403 会被说成“模型服务鉴权失败”），
 		// 方舟把真实原因（如 SubscriptionRequired）放在响应体的 ResponseMetadata.Error 里，必须还原。
-		var httpErr providerHTTPError
+		var httpErr providerFailure
 		if errors.As(err, &httpErr) && strings.TrimSpace(httpErr.Body) != "" {
 			var body map[string]interface{}
 			if json.Unmarshal([]byte(httpErr.Body), &body) == nil {

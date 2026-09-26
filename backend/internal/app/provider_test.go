@@ -823,34 +823,34 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
 }
 
 func TestProviderHTTPErrorWarnsAboutUncertain524Billing(t *testing.T) {
-	message := (providerHTTPError{StatusCode: 524, Status: "524 A Timeout Occurred"}).Error()
+	message := (providerFailure{StatusCode: 524, Status: "524 A Timeout Occurred"}).Error()
 	if !strings.Contains(message, "可能仍在服务端执行并产生费用") || !strings.Contains(message, "请勿立即重试") {
-		t.Fatalf("providerHTTPError.Error() = %q", message)
+		t.Fatalf("providerFailure.Error() = %q", message)
 	}
 }
 
 func TestProviderHTTPErrorDoesNotExposeResponseBody(t *testing.T) {
-	message := (providerHTTPError{
+	message := (providerFailure{
 		StatusCode: http.StatusBadGateway,
 		Status:     "502 Bad Gateway",
 		Body:       `{"error":{"message":"api-key=secret"}}`,
 	}).Error()
 	if strings.Contains(message, "api-key") || strings.Contains(message, "secret") || strings.Contains(message, `{"error"`) {
-		t.Fatalf("providerHTTPError exposed upstream response body: %q", message)
+		t.Fatalf("providerFailure exposed upstream response body: %q", message)
 	}
 	if !strings.Contains(message, "HTTP 502") {
-		t.Fatalf("providerHTTPError.Error() = %q", message)
+		t.Fatalf("providerFailure.Error() = %q", message)
 	}
 }
 
 func TestShouldFallbackTextToChatOnlyForMissingCapability(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented} {
-		if !shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
+		if !shouldFallbackTextToChat(providerFailure{StatusCode: status}) {
 			t.Errorf("status %d should fallback to chat completions", status)
 		}
 	}
 	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusInternalServerError, http.StatusTooManyRequests} {
-		if shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
+		if shouldFallbackTextToChat(providerFailure{StatusCode: status}) {
 			t.Errorf("status %d should not fallback to chat completions", status)
 		}
 	}
@@ -957,7 +957,7 @@ func TestProviderUserFacingErrorMessageClassifiesRejectedRequestBodies(t *testin
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			message := providerUserFacingErrorMessage(providerHTTPError{StatusCode: tt.statusCode, Body: tt.body})
+			message := providerUserFacingErrorMessage(providerFailure{StatusCode: tt.statusCode, Body: tt.body})
 			if !strings.Contains(message, tt.want) {
 				t.Fatalf("providerUserFacingErrorMessage() = %q, want category %q", message, tt.want)
 			}
@@ -971,7 +971,7 @@ func TestProviderUserFacingErrorMessageClassifiesRejectedRequestBodies(t *testin
 func TestProviderUserFacingErrorMessageOnlyClassifiesValidationStatuses(t *testing.T) {
 	// 鉴权失败与网关错误的正文可能是密钥诊断或代理 HTML，不参与归类。
 	for _, statusCode := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusBadGateway} {
-		message := providerUserFacingErrorMessage(providerHTTPError{
+		message := providerUserFacingErrorMessage(providerFailure{
 			StatusCode: statusCode,
 			Body:       `{"error":{"message":"blocked by content policy, api-key=secret"}}`,
 		})
@@ -985,7 +985,7 @@ func TestProviderUserFacingErrorMessageOnlyClassifiesValidationStatuses(t *testi
 }
 
 func TestProviderUserFacingErrorMessageClassifiesWrappedHTTPErrors(t *testing.T) {
-	wrapped := fmt.Errorf("视频任务创建失败：%w", providerHTTPError{
+	wrapped := fmt.Errorf("视频任务创建失败：%w", providerFailure{
 		StatusCode: http.StatusBadRequest,
 		Body:       `{"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"may contain real person","request_id":"secret-trace"}}`,
 	})

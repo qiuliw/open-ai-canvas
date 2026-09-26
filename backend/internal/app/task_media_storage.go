@@ -134,7 +134,7 @@ func (s *Service) downloadTaskMedia(ctx context.Context, config providerConfig, 
 	defer response.Body.Close()
 	statusCode = response.StatusCode
 	if statusCode < 200 || statusCode >= 300 {
-		return "", "", providerHTTPError{StatusCode: statusCode, Status: response.Status, RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"), time.Now())}
+		return "", "", providerFailure{StatusCode: statusCode, Status: response.Status, RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"), time.Now())}
 	}
 	if response.ContentLength > limit {
 		return "", "", errors.New("生成文件超过大小限制")

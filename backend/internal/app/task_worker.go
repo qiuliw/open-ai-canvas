@@ -276,8 +276,8 @@ func (w *taskWorkerCoordinator) processClaimedTask(task *model.Task, globalSlot 
 		if decryptErr == nil && s.shouldDeferVideoProviderTask(*task, decryptedInput, err) {
 			stage := "后台仍在生成"
 			message := "前台等待结束，上游视频仍在生成，将继续回查原任务"
-			var pendingErr providerStatePendingError
-			if errors.As(err, &pendingErr) {
+			var failure providerFailure
+			if errors.As(err, &failure) && failure.Pending {
 				stage = "等待上游任务同步"
 				message = "上游任务状态暂未同步，将继续回查原任务"
 			}
@@ -393,9 +393,9 @@ func (s *Service) shouldDeferVideoProviderTask(task model.Task, decryptedInput s
 		return false
 	}
 	deferSignal := errors.Is(err, context.DeadlineExceeded)
-	var pendingErr providerStatePendingError
-	if errors.As(err, &pendingErr) {
-		deferSignal = strings.TrimSpace(pendingErr.TaskID) == providerRequestID && !newAPIChannel2TaskSyncExpired(task, err, time.Now())
+	var failure providerFailure
+	if errors.As(err, &failure) && failure.Pending {
+		deferSignal = strings.TrimSpace(failure.TaskID) == providerRequestID && !newAPIChannel2TaskSyncExpired(task, err, time.Now())
 	}
 	if !deferSignal {
 		return false
@@ -409,8 +409,8 @@ func (s *Service) shouldDeferVideoProviderTask(task model.Task, decryptedInput s
 }
 
 func newAPIChannel2TaskSyncExpired(task model.Task, err error, now time.Time) bool {
-	var pendingErr providerStatePendingError
-	if !errors.As(err, &pendingErr) || strings.TrimSpace(pendingErr.TaskID) == "" || strings.TrimSpace(pendingErr.TaskID) != strings.TrimSpace(task.ProviderRequestID) {
+	var failure providerFailure
+	if !errors.As(err, &failure) || !failure.Pending || strings.TrimSpace(failure.TaskID) == "" || strings.TrimSpace(failure.TaskID) != strings.TrimSpace(task.ProviderRequestID) {
 		return false
 	}
 	if task.StartedAt == nil {

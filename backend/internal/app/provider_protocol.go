@@ -76,7 +76,7 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 		}
 		body, streamedResult, err := executeProtocolCreateRequest(withProviderRequestKind(ctx, "create"), input, spec)
 		if err != nil {
-			return nil, err
+			return nil, interpretProtocolHTTPError(adapter, "", err)
 		}
 		if streamedResult != nil {
 			created = protocol.CreateResult{Status: protocol.StatusSucceeded, Result: streamedResult}
@@ -112,7 +112,7 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 		}
 		body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
 		if err != nil {
-			return videoPollOutcome{}, err
+			return videoPollOutcome{}, interpretProtocolHTTPError(adapter, taskID, err)
 		}
 		state, err := adapter.ParsePoll(ctx, protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}, body)
 		if err != nil {
@@ -164,7 +164,7 @@ func queryProtocolAdapterVideoTask(ctx context.Context, input canvasGenerationIn
 	}
 	body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
 	if err != nil {
-		return nil, "", err
+		return nil, "", interpretProtocolHTTPError(adapter, taskID, err)
 	}
 	state, err := adapter.ParsePoll(ctx, pollContext, body)
 	if err != nil {
@@ -322,6 +322,45 @@ func protocolMediaReference(value providerMedia, kind string, order int) protoco
 func executeProtocolRequest(ctx context.Context, config providerConfig, spec protocol.RequestSpec) ([]byte, error) {
 	data, _, err := executeProtocolBinaryRequest(ctx, config, spec)
 	return data, err
+}
+
+// interpretProtocolHTTPError gives declarative plugins a chance to parse non-2xx
+// bodies and remap status codes. Pending/processing with a known task ID becomes
+// providerFailure{Pending:true} so the poll loop can continue the original task.
+func interpretProtocolHTTPError(adapter protocol.Adapter, taskID string, err error) error {
+	var failure providerFailure
+	if !errors.As(err, &failure) {
+		return err
+	}
+	enrichProviderFailure(&failure)
+	interpreter, ok := adapter.(protocol.HTTPErrorAdapter)
+	if !ok {
+		return failure
+	}
+	interp, handled := interpreter.InterpretHTTPError(context.Background(), failure.StatusCode, []byte(failure.Body))
+	if !handled {
+		return failure
+	}
+	if strings.TrimSpace(interp.Code) != "" {
+		failure.Code = strings.TrimSpace(interp.Code)
+	}
+	if strings.TrimSpace(interp.Message) != "" {
+		failure.Message = strings.TrimSpace(interp.Message)
+	}
+	switch interp.Status {
+	case protocol.StatusPending, protocol.StatusProcessing:
+		if strings.TrimSpace(taskID) == "" {
+			return failure
+		}
+		failure.Pending = true
+		failure.TaskID = taskID
+		return failure
+	default:
+		if interp.MappedStatusCode > 0 {
+			failure.StatusCode = interp.MappedStatusCode
+		}
+		return failure
+	}
 }
 
 // executeProtocolBinaryRequest 是声明式插件与宿主网络能力之间的边界。manifest 只能声明

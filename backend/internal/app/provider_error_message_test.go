@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -37,12 +36,12 @@ func TestProviderErrorDetail(t *testing.T) {
 func TestTaskFailurePreservesSafeProviderDetail(t *testing.T) {
 	const detail = "非常抱歉，生成的图片可能违反了关于裸露、色情或情色内容的防护限制。请重试或修改提示语。"
 	for _, status := range []int{400, 403, 422, 429, 500, 502} {
-		err := fmt.Errorf("图片生成失败：%w", providerHTTPError{StatusCode: status, Body: `{"error":{"message":"` + detail + `"}}`})
+		err := fmt.Errorf("图片生成失败：%w", providerFailure{StatusCode: status, Body: `{"error":{"message":"` + detail + `"}}`})
 		if got := taskFailureMessage(err); !strings.Contains(got, "；上游："+detail) {
 			t.Fatalf("status %d lost detail: %s", status, got)
 		}
 	}
-	if got := taskFailureMessage(errors.New(providerPayloadErrorMessage(detail))); !strings.Contains(got, detail) {
+	if got := taskFailureMessage(providerFailureFromMessage(detail)); !strings.Contains(got, detail) {
 		t.Fatalf("business failure lost detail: %s", got)
 	}
 }

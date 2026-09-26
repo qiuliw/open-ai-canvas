@@ -17,7 +17,7 @@ func TestVideoPollRecoversFromTransientHTTPError(t *testing.T) {
 		attempts++
 		switch attempts {
 		case 1:
-			return videoPollOutcome{}, providerHTTPError{StatusCode: http.StatusBadGateway, Status: "502 Bad Gateway"}
+			return videoPollOutcome{}, providerFailure{StatusCode: http.StatusBadGateway, Status: "502 Bad Gateway"}
 		case 2:
 			return videoPollOutcome{}, nil
 		default:
@@ -45,7 +45,7 @@ func TestVideoPollWaitsBeforeFirstQueryAndUsesRetryAfter(t *testing.T) {
 	_, err := runVideoPollLoop(context.Background(), "provider-task-1", policy, func(context.Context) (videoPollOutcome, error) {
 		attempts++
 		if attempts == 1 {
-			return videoPollOutcome{}, providerHTTPError{StatusCode: http.StatusTooManyRequests, RetryAfter: 20 * time.Millisecond}
+			return videoPollOutcome{}, providerFailure{StatusCode: http.StatusTooManyRequests, RetryAfter: 20 * time.Millisecond}
 		}
 		return videoPollOutcome{Done: true, Result: map[string]interface{}{"mode": "video"}}, nil
 	})
@@ -61,9 +61,9 @@ func TestVideoPollStopsImmediatelyOnAuthenticationError(t *testing.T) {
 	attempts := 0
 	_, err := runVideoPollLoop(context.Background(), "provider-task-1", fastVideoPollPolicy(), func(context.Context) (videoPollOutcome, error) {
 		attempts++
-		return videoPollOutcome{}, providerHTTPError{StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized"}
+		return videoPollOutcome{}, providerFailure{StatusCode: http.StatusUnauthorized, Status: "401 Unauthorized"}
 	})
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("error = %#v, want 401 provider error", err)
 	}
@@ -76,9 +76,9 @@ func TestVideoPollStopsAfterThreeConsecutiveNotFoundResponses(t *testing.T) {
 	attempts := 0
 	_, err := runVideoPollLoop(context.Background(), "provider-task-1", fastVideoPollPolicy(), func(context.Context) (videoPollOutcome, error) {
 		attempts++
-		return videoPollOutcome{}, providerHTTPError{StatusCode: http.StatusNotFound, Status: "404 Not Found"}
+		return videoPollOutcome{}, providerFailure{StatusCode: http.StatusNotFound, Status: "404 Not Found"}
 	})
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
 		t.Fatalf("error = %#v, want 404 provider error", err)
 	}
@@ -93,7 +93,7 @@ func TestVideoPollSuccessfulPendingResponseResetsNotFoundCounter(t *testing.T) {
 		attempts++
 		switch attempts {
 		case 1, 3:
-			return videoPollOutcome{}, providerHTTPError{StatusCode: http.StatusNotFound, Status: "404 Not Found"}
+			return videoPollOutcome{}, providerFailure{StatusCode: http.StatusNotFound, Status: "404 Not Found"}
 		case 2:
 			return videoPollOutcome{}, nil
 		default:
@@ -154,7 +154,7 @@ func TestVideoPollNotifiesOnlyWhenRetryStartsAndRecovers(t *testing.T) {
 		attempts++
 		switch attempts {
 		case 1, 2:
-			return videoPollOutcome{}, providerHTTPError{StatusCode: http.StatusBadGateway}
+			return videoPollOutcome{}, providerFailure{StatusCode: http.StatusBadGateway}
 		case 3:
 			return videoPollOutcome{}, nil
 		default:
@@ -217,7 +217,7 @@ func TestVideoDownloadRetriesTransientFailure(t *testing.T) {
 	data, mimeType, err := runVideoDownload(context.Background(), "provider-task-1", policy, func(context.Context) ([]byte, string, error) {
 		attempts++
 		if attempts == 1 {
-			return nil, "", providerHTTPError{StatusCode: http.StatusBadGateway, Status: "502 Bad Gateway"}
+			return nil, "", providerFailure{StatusCode: http.StatusBadGateway, Status: "502 Bad Gateway"}
 		}
 		return []byte("video"), "video/mp4", nil
 	})
@@ -233,9 +233,9 @@ func TestVideoDownloadStopsAfterThreeTransientFailures(t *testing.T) {
 	attempts := 0
 	_, _, err := runVideoDownload(context.Background(), "provider-task-1", fastVideoPollPolicy(), func(context.Context) ([]byte, string, error) {
 		attempts++
-		return nil, "", providerHTTPError{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable"}
+		return nil, "", providerFailure{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable"}
 	})
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) || attempts != 3 {
 		t.Fatalf("error = %#v, attempts = %d, want three attempts and provider error", err, attempts)
 	}
@@ -245,7 +245,7 @@ func TestVideoPollDoesNotRetryExhaustedDownload(t *testing.T) {
 	attempts := 0
 	_, err := runVideoPollLoop(context.Background(), "provider-task-1", fastVideoPollPolicy(), func(context.Context) (videoPollOutcome, error) {
 		attempts++
-		return videoPollOutcome{}, videoDownloadError{TaskID: "provider-task-1", Cause: providerHTTPError{StatusCode: http.StatusBadGateway}}
+		return videoPollOutcome{}, videoDownloadError{TaskID: "provider-task-1", Cause: providerFailure{StatusCode: http.StatusBadGateway}}
 	})
 	var downloadError videoDownloadError
 	if !errors.As(err, &downloadError) || attempts != 1 {

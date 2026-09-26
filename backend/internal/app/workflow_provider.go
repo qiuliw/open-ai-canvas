@@ -574,7 +574,7 @@ func (s *Service) uploadRunningHubMedia(ctx context.Context, root string, config
 }
 
 func runningHubUploadAuthFailure(err error) string {
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
 		return ""
 	}

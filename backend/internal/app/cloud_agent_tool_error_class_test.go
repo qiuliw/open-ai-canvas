@@ -33,8 +33,8 @@ func TestCloudAgentToolErrorClass(t *testing.T) {
 		{"参数不符合契约", canvasRequest, call("canvas_get_state"), cloudAgentJSONArgumentError(errors.New("unknown field")), true, cloudAgentToolErrorSchemaError, true, "fix_arguments"},
 		{"字段级参数错误", canvasRequest, call("canvas_apply_ops"), cloudAgentFieldError("snapshotHash", "required", "缺 snapshotHash"), true, cloudAgentToolErrorSchemaError, true, "fix_arguments"},
 		{"画布已变化", canvasRequest, call("canvas_apply_ops"), cloudAgentFieldError("snapshotHash", "stale_snapshot", "画布已变化"), true, cloudAgentToolErrorStateConflict, true, "reread_canvas"},
-		{"上游 5xx", canvasRequest, call("task_get"), providerHTTPError{StatusCode: 503}, true, cloudAgentToolErrorUpstream, true, "report_to_user"},
-		{"上游 4xx", canvasRequest, call("task_get"), providerHTTPError{StatusCode: 400}, true, cloudAgentToolErrorUpstream, false, "report_to_user"},
+		{"上游 5xx", canvasRequest, call("task_get"), providerFailure{StatusCode: 503}, true, cloudAgentToolErrorUpstream, true, "report_to_user"},
+		{"上游 4xx", canvasRequest, call("task_get"), providerFailure{StatusCode: 400}, true, cloudAgentToolErrorUpstream, false, "report_to_user"},
 		{"超时", canvasRequest, call("task_get"), context.DeadlineExceeded, true, cloudAgentToolErrorUpstream, true, "report_to_user"},
 		{"其它", canvasRequest, call("task_get"), errors.New("说不清"), true, cloudAgentToolErrorUnknown, true, ""},
 	}

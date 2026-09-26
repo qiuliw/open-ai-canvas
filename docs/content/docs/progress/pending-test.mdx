@@ -5,6 +5,15 @@ description: 当前项目已实现功能的手工验证清单与未确认边界
 
 # 待测试
 
+## 上游错误解析归一（Issue #634）
+
+- 已实现：统一 `providerFailure`；非 2xx 走插件 `InterpretHTTPError`；2xx 业务失败优先 `protocol.BusinessFailure`（`errorPaths`/`messagePaths`），宿主仅保留 OpenAI 兼容顶层形状；去掉 `output`/`task_status` 宿主特判与调用日志双通道；NewAPI Channel 2 用 `httpErrors` 声明 `task_not_exist → pending`。
+- [ ] 真实渠道验收：声明式视频 create/poll 失败时调用日志的 code/message 与任务失败文案一致；NewAPI Channel 2 短暂 `task_not_exist` 继续查原任务；DashScope 嵌套 `output.code` 失败由插件路径识别，不再依赖宿主特判。
+
+## 声明式协议 HTTP 错误解释
+
+- 已并入「上游错误解析归一」；见上节。
+
 ## 发布回归与资源引用保护
 
 - 已修复：素材表现只在 `metadata_json` 引用资源时，批量删除和管理员资源检查仍识别该引用，不误删共享资源。已有回归覆盖共享对象、跨用户别名、事务回滚和删除队列。

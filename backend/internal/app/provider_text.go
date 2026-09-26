@@ -372,13 +372,10 @@ func isAgentToolChoiceCompatibilityError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	var payloadErr providerPayloadError
-	if errors.As(err, &payloadErr) {
-		message += " " + strings.ToLower(payloadErr.raw)
-	}
-	var httpErr providerHTTPError
-	if errors.As(err, &httpErr) {
-		message += " " + strings.ToLower(httpErr.Body)
+	var failure providerFailure
+	if errors.As(err, &failure) {
+		message += " " + strings.ToLower(failure.Body)
+		message += " " + strings.ToLower(failure.Message)
 	}
 	return strings.Contains(message, "tool_choice") || strings.Contains(message, "tool choice") || strings.Contains(message, "tool-choice") || strings.Contains(message, "thinking mode")
 }
@@ -1088,7 +1085,7 @@ func textChatContent(input canvasGenerationInput) (interface{}, error) {
 }
 
 func shouldFallbackTextToChat(err error) bool {
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) {
 		return false
 	}
@@ -1162,14 +1159,14 @@ func extractTextPayload(payload map[string]interface{}, protocol string) string 
 }
 
 func validateTextPayload(payload map[string]interface{}) error {
-	if code, ok := payload["code"].(float64); ok && code != 0 {
-		rawMessage := defaultString(stringField(payload, "msg"), "请求失败")
-		return providerPayloadError{raw: rawMessage, message: providerPayloadErrorMessage(rawMessage)}
-	}
-	if errValue, ok := payload["error"].(map[string]interface{}); ok {
-		if message := stringField(errValue, "message"); message != "" {
-			return providerPayloadError{raw: message, message: providerPayloadErrorMessage(message)}
+	if code, message, failed := openAICompatibleBusinessFailure(payload); failed {
+		raw := message
+		if raw == "" {
+			raw = code
 		}
+		failure := providerFailureFromMessage(raw)
+		failure.Code = code
+		return failure
 	}
 	return nil
 }
