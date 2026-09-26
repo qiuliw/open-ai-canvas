@@ -942,6 +942,8 @@ func protocolResultError(message, taskID string) error {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = "上游返回失败状态"
+	} else {
+		message = providerErrorWithDetail(message, message)
 	}
 	if taskID == "" {
 		return errors.New(message)
