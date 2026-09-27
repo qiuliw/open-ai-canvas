@@ -13,6 +13,17 @@ type Adapter interface {
 	BuildCancel(context.Context, PollContext) (RequestSpec, error)
 }
 
+// ResponseError is the declarative channel-config view of one upstream
+// response (errorPaths / messagePaths / httpErrors / statusCodeMapping).
+// Host interpretUpstream consumes it; plugins only declare shape in manifest.
+type ResponseError struct {
+	Failed           bool
+	Pending          bool   // continue original task; only for non-2xx httpErrors
+	Code             string
+	Message          string
+	MappedStatusCode int // 0 keeps the original HTTP status
+}
+
 // AgentAdapter is the optional protocol surface for tool-capable text calls.
 // The host still owns credentials, outbound policy and billing; a plugin only
 // maps the platform's agent request into the provider payload and parses the

@@ -76,7 +76,7 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 		}
 		body, streamedResult, err := executeProtocolCreateRequest(withProviderRequestKind(ctx, "create"), input, spec)
 		if err != nil {
-			return nil, err
+			return nil, interpretUpstreamErr(adapter, "", err)
 		}
 		if streamedResult != nil {
 			created = protocol.CreateResult{Status: protocol.StatusSucceeded, Result: streamedResult}
@@ -112,7 +112,7 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 		}
 		body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
 		if err != nil {
-			return videoPollOutcome{}, err
+			return videoPollOutcome{}, interpretUpstreamErr(adapter, taskID, err)
 		}
 		state, err := adapter.ParsePoll(ctx, protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}, body)
 		if err != nil {
@@ -164,7 +164,7 @@ func queryProtocolAdapterVideoTask(ctx context.Context, input canvasGenerationIn
 	}
 	body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
 	if err != nil {
-		return nil, "", err
+		return nil, "", interpretUpstreamErr(adapter, taskID, err)
 	}
 	state, err := adapter.ParsePoll(ctx, pollContext, body)
 	if err != nil {

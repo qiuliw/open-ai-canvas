@@ -258,7 +258,7 @@ func retryableMediaRecovery(err error) bool {
 	if retryableProtocolMediaDownload(err) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	var upstream providerHTTPError
+	var upstream providerFailure
 	return errors.As(err, &upstream) && (upstream.StatusCode == 429 || upstream.StatusCode == 408 || upstream.StatusCode >= 500)
 }
 
@@ -287,7 +287,7 @@ func (s *Service) handleMediaRecoveryFailure(task *model.Task, cause error) erro
 		}
 		if failure.retryable && checkpoint.Attempts < len(mediaRecoveryDelays) && time.Since(checkpoint.StartedAt) < 20*time.Minute {
 			delay := mediaRecoveryDelays[checkpoint.Attempts] + time.Duration(rand.IntN(5_000))*time.Millisecond
-			var upstream providerHTTPError
+			var upstream providerFailure
 			if errors.As(cause, &upstream) {
 				delay = max(delay, min(upstream.RetryAfter, 10*time.Minute))
 			}

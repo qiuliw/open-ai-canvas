@@ -823,34 +823,34 @@ data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta"
 }
 
 func TestProviderHTTPErrorWarnsAboutUncertain524Billing(t *testing.T) {
-	message := (providerHTTPError{StatusCode: 524, Status: "524 A Timeout Occurred"}).Error()
+	message := (providerFailure{StatusCode: 524, Status: "524 A Timeout Occurred"}).Error()
 	if !strings.Contains(message, "可能仍在服务端执行并产生费用") || !strings.Contains(message, "请勿立即重试") {
-		t.Fatalf("providerHTTPError.Error() = %q", message)
+		t.Fatalf("providerFailure.Error() = %q", message)
 	}
 }
 
 func TestProviderHTTPErrorDoesNotExposeResponseBody(t *testing.T) {
-	message := (providerHTTPError{
+	message := (providerFailure{
 		StatusCode: http.StatusBadGateway,
 		Status:     "502 Bad Gateway",
 		Body:       `{"error":{"message":"api-key=secret"}}`,
 	}).Error()
 	if strings.Contains(message, "api-key") || strings.Contains(message, "secret") || strings.Contains(message, `{"error"`) {
-		t.Fatalf("providerHTTPError exposed upstream response body: %q", message)
+		t.Fatalf("providerFailure exposed upstream response body: %q", message)
 	}
 	if !strings.Contains(message, "HTTP 502") {
-		t.Fatalf("providerHTTPError.Error() = %q", message)
+		t.Fatalf("providerFailure.Error() = %q", message)
 	}
 }
 
 func TestShouldFallbackTextToChatOnlyForMissingCapability(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented} {
-		if !shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
+		if !shouldFallbackTextToChat(providerFailure{StatusCode: status}) {
 			t.Errorf("status %d should fallback to chat completions", status)
 		}
 	}
 	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusInternalServerError, http.StatusTooManyRequests} {
-		if shouldFallbackTextToChat(providerHTTPError{StatusCode: status}) {
+		if shouldFallbackTextToChat(providerFailure{StatusCode: status}) {
 			t.Errorf("status %d should not fallback to chat completions", status)
 		}
 	}
@@ -872,15 +872,15 @@ func TestProviderPayloadErrorMessageUsesSafeActionableCategories(t *testing.T) {
 		{name: "reasoning mode rejects forced tool choice", raw: `{"error":{"message":"tool_choice=required is not supported in reasoning mode"}}`, want: "不支持强制工具调用"},
 		// 真实上游原文：一轮里模型发了多个 canvas_inspect_image 调用，历史里的图片
 		// 插在 tool 结果之间，上游按"tool_call_id 没有被回应"拒绝。它含 "insufficient"，
-		// 落到额度类目会把协议错误报成"渠道余额不足"（见 providerPayloadErrorCategory）。
+		// 落到额度类目会把协议错误报成"渠道余额不足"（见 providerFailureCategory）。
 		{name: "tool call pairing", raw: `{"error":{"message":"An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. (insufficient tool messages following tool_calls message)","type":"invalid_request_error","request_id":"secret-trace"}}`, want: "工具调用与结果不匹配"},
 		{name: "unknown", raw: "trace_id=private internal stack", want: "模型服务返回失败"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			message := providerPayloadErrorMessage(tt.raw)
+			message := providerFailureUserMessage(tt.raw)
 			if !strings.Contains(message, tt.want) {
-				t.Fatalf("providerPayloadErrorMessage() = %q, want category %q", message, tt.want)
+				t.Fatalf("providerFailureUserMessage() = %q, want category %q", message, tt.want)
 			}
 			if strings.Contains(message, "secret") || strings.Contains(message, "private") {
 				t.Fatalf("provider payload detail leaked: %q", message)
@@ -891,12 +891,12 @@ func TestProviderPayloadErrorMessageUsesSafeActionableCategories(t *testing.T) {
 
 func TestProviderPayloadErrorCategoryFlagsRealPersonRejection(t *testing.T) {
 	raw := `{"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"The request failed because the input image 'content[1]' may contain real person. Request id: secret-trace"}}`
-	message, ok := providerPayloadErrorCategory(raw)
+	message, ok := providerFailureCategory(raw)
 	if !ok {
-		t.Fatalf("providerPayloadErrorCategory() ok = false, want true")
+		t.Fatalf("providerFailureCategory() ok = false, want true")
 	}
 	if !strings.Contains(message, "真人形象") {
-		t.Fatalf("providerPayloadErrorCategory() = %q, want 真人形象 category", message)
+		t.Fatalf("providerFailureCategory() = %q, want 真人形象 category", message)
 	}
 	if strings.Contains(message, "secret") || strings.Contains(message, "content[1]") {
 		t.Fatalf("provider payload detail leaked: %q", message)
@@ -905,8 +905,8 @@ func TestProviderPayloadErrorCategoryFlagsRealPersonRejection(t *testing.T) {
 
 func TestProviderPayloadErrorCategoryReportsUnclassifiedBodies(t *testing.T) {
 	for _, raw := range []string{"", "   ", "trace_id=private internal stack"} {
-		if message, ok := providerPayloadErrorCategory(raw); ok {
-			t.Fatalf("providerPayloadErrorCategory(%q) = %q, want no category", raw, message)
+		if message, ok := providerFailureCategory(raw); ok {
+			t.Fatalf("providerFailureCategory(%q) = %q, want no category", raw, message)
 		}
 	}
 }
@@ -957,7 +957,7 @@ func TestProviderUserFacingErrorMessageClassifiesRejectedRequestBodies(t *testin
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			message := providerUserFacingErrorMessage(providerHTTPError{StatusCode: tt.statusCode, Body: tt.body})
+			message := providerUserFacingErrorMessage(providerFailure{StatusCode: tt.statusCode, Body: tt.body})
 			if !strings.Contains(message, tt.want) {
 				t.Fatalf("providerUserFacingErrorMessage() = %q, want category %q", message, tt.want)
 			}
@@ -971,7 +971,7 @@ func TestProviderUserFacingErrorMessageClassifiesRejectedRequestBodies(t *testin
 func TestProviderUserFacingErrorMessageOnlyClassifiesValidationStatuses(t *testing.T) {
 	// 鉴权失败与网关错误的正文可能是密钥诊断或代理 HTML，不参与归类。
 	for _, statusCode := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusBadGateway} {
-		message := providerUserFacingErrorMessage(providerHTTPError{
+		message := providerUserFacingErrorMessage(providerFailure{
 			StatusCode: statusCode,
 			Body:       `{"error":{"message":"blocked by content policy, api-key=secret"}}`,
 		})
@@ -985,7 +985,7 @@ func TestProviderUserFacingErrorMessageOnlyClassifiesValidationStatuses(t *testi
 }
 
 func TestProviderUserFacingErrorMessageClassifiesWrappedHTTPErrors(t *testing.T) {
-	wrapped := fmt.Errorf("视频任务创建失败：%w", providerHTTPError{
+	wrapped := fmt.Errorf("视频任务创建失败：%w", providerFailure{
 		StatusCode: http.StatusBadRequest,
 		Body:       `{"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"may contain real person","request_id":"secret-trace"}}`,
 	})
@@ -1029,21 +1029,21 @@ func TestProviderPayloadErrorCategoryIgnoresEchoedPortraitWording(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			message, ok := providerPayloadErrorCategory(tt.raw)
+			message, ok := providerFailureCategory(tt.raw)
 			if tt.want == "" {
 				if ok {
-					t.Fatalf("providerPayloadErrorCategory() = %q, want no category", message)
+					t.Fatalf("providerFailureCategory() = %q, want no category", message)
 				}
 				return
 			}
 			if !ok {
-				t.Fatalf("providerPayloadErrorCategory() ok = false, want category %q", tt.want)
+				t.Fatalf("providerFailureCategory() ok = false, want category %q", tt.want)
 			}
 			if strings.Contains(message, "真人形象") {
 				t.Fatalf("echoed portrait wording misclassified as likeness: %q", message)
 			}
 			if !strings.Contains(message, tt.want) {
-				t.Fatalf("providerPayloadErrorCategory() = %q, want category %q", message, tt.want)
+				t.Fatalf("providerFailureCategory() = %q, want category %q", message, tt.want)
 			}
 		})
 	}
@@ -1052,9 +1052,9 @@ func TestProviderPayloadErrorCategoryIgnoresEchoedPortraitWording(t *testing.T) 
 // 供应商错误码与安全审核措辞同时出现时，以更具体的错误码为准。
 func TestProviderPayloadErrorCategoryPrefersProviderCodeOverModerationWording(t *testing.T) {
 	raw := `{"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"blocked by content policy"}}`
-	message, ok := providerPayloadErrorCategory(raw)
+	message, ok := providerFailureCategory(raw)
 	if !ok || !strings.Contains(message, "真人形象") {
-		t.Fatalf("providerPayloadErrorCategory() = %q, ok = %v, want 真人形象 category", message, ok)
+		t.Fatalf("providerFailureCategory() = %q, ok = %v, want 真人形象 category", message, ok)
 	}
 }
 

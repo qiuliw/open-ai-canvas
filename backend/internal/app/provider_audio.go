@@ -165,7 +165,7 @@ func asyncAudioResultURL(state map[string]interface{}) string {
 }
 
 func asyncAudioErrorMessage(state map[string]interface{}) string {
-	_, message := providerFailureDetails(state)
+	_, message := generalErrorFields(state)
 	return defaultString(message, firstNonEmptyString(stringField(state, "message"), "上游返回失败状态"))
 }
 

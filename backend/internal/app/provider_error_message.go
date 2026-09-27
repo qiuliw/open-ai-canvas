@@ -41,7 +41,7 @@ func providerErrorMessageField(value any) string {
 }
 
 func providerErrorWithDetail(fallback, raw string) string {
-	if message, ok := providerPayloadErrorCategory(raw); ok {
+	if message, ok := providerFailureCategory(raw); ok {
 		fallback = message
 	}
 	return appendProviderErrorDetail(fallback, raw)

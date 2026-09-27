@@ -68,13 +68,12 @@ func cloudAgentToolErrorClass(req CloudAgentRequest, call cloudAgentCall, err er
 		}
 		return cloudAgentToolErrorSchemaError, true, "fix_arguments"
 	}
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if errors.As(err, &httpErr) {
+		if httpErr.Pending {
+			return cloudAgentToolErrorUpstream, true, "report_to_user"
+		}
 		return cloudAgentToolErrorUpstream, httpErr.StatusCode >= 500 || httpErr.StatusCode == 429, "report_to_user"
-	}
-	var pendingErr providerStatePendingError
-	if errors.As(err, &pendingErr) {
-		return cloudAgentToolErrorUpstream, true, "report_to_user"
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return cloudAgentToolErrorUpstream, true, "report_to_user"

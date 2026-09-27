@@ -986,7 +986,7 @@ func (s *Service) enrichAPICallLogFailureSummary(log *model.ApiCallLog, response
 	if log.Status != model.ApiCallStatusFailed || log.StatusCode < 400 {
 		return
 	}
-	userMessage := providerUserFacingErrorMessage(providerHTTPError{
+	userMessage := providerUserFacingErrorMessage(providerFailure{
 		StatusCode: log.StatusCode,
 		Body:       string(responseBody),
 	})
@@ -1024,7 +1024,7 @@ func (s *Service) enrichAPICallLogPayload(log *model.ApiCallLog, payload map[str
 		}
 	}
 	if log.Status == model.ApiCallStatusFailed {
-		errorCode, errorMessage := providerFailureDetails(payload)
+		errorCode, errorMessage := generalErrorFields(payload)
 		log.ErrorCode = errorCode
 		if errorMessage != "" {
 			log.Error = errorMessage
@@ -1079,7 +1079,7 @@ func (s *Service) enrichAPICallLogPayload(log *model.ApiCallLog, payload map[str
 	log.ProviderStatus = strings.ToLower(firstNonEmpty(stringField(payload, "status"), log.ProviderStatus))
 	if log.ProviderStatus == "failed" || log.ProviderStatus == "cancelled" || log.ProviderStatus == "expired" {
 		log.Status = model.ApiCallStatusFailed
-		errorCode, errorMessage := providerFailureDetails(payload)
+		errorCode, errorMessage := generalErrorFields(payload)
 		log.ErrorCode = firstNonEmpty(errorCode, log.ErrorCode)
 		log.Error = firstNonEmpty(errorMessage, log.Error)
 	}

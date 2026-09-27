@@ -282,7 +282,7 @@ func TestMediaRecoveryTerminalStagesLimitsAndPublicList(t *testing.T) {
 		age      time.Duration
 		failure  *mediaRecoveryError
 	}{
-		{"permanent", 0, 0, &mediaRecoveryError{stage: "upload", cause: providerHTTPError{StatusCode: 403}}},
+		{"permanent", 0, 0, &mediaRecoveryError{stage: "upload", cause: providerFailure{StatusCode: 403}}},
 		{"budget", 4, 0, &mediaRecoveryError{stage: "download", retryable: true, cause: errors.New("reset")}},
 		{"expired", 0, time.Hour, &mediaRecoveryError{stage: "register", retryable: true, cause: errors.New("database unavailable")}},
 	} {

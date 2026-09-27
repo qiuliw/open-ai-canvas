@@ -194,22 +194,9 @@ func doJSON(req *http.Request, target interface{}) error {
 	if err := json.Unmarshal(data, target); err != nil {
 		return providerResponseDecodeError{Err: err}
 	}
-	if payload, ok := target.(*imageResponse); ok {
-		if payload.Error != nil && payload.Error.Message != "" {
-			return errors.New(providerPayloadErrorMessage(payload.Error.Message))
-		}
-		if payload.Code != nil && *payload.Code != 0 {
-			return errors.New(providerPayloadErrorMessage(payload.Msg))
-		}
-	}
-	if payload, ok := target.(*map[string]interface{}); ok {
-		if _, rawMessage, failed := providerPayloadBusinessFailure(*payload); failed {
-			return providerPayloadError{raw: rawMessage, message: providerPayloadErrorMessage(rawMessage)}
-		}
-		if errValue, ok := (*payload)["error"].(map[string]interface{}); ok && stringField(errValue, "message") != "" {
-			rawMessage := stringField(errValue, "message")
-			return providerPayloadError{raw: rawMessage, message: providerPayloadErrorMessage(rawMessage)}
-		}
+	adapter := protocolAdapterFromAnalytics(req.Context(), analyticsFromContext(req.Context()))
+	if failed, failure := interpretUpstream(adapter, "", http.StatusOK, data); failed {
+		return failure
 	}
 	return nil
 }
@@ -321,7 +308,11 @@ func doBinaryWithConsumer(req *http.Request, onChunk func(string, []byte)) ([]by
 		if runtimeService != nil {
 			_ = runtimeService.RecordChannelResult(req.Context(), channelID, resp.StatusCode >= 500)
 		}
-		httpErr := providerHTTPError{StatusCode: resp.StatusCode, Status: resp.Status, Body: string(data), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		adapter := protocolAdapterFromAnalytics(req.Context(), analyticsFromContext(req.Context()))
+		_, httpErr := interpretUpstream(adapter, "", resp.StatusCode, data)
+		httpErr.Status = resp.Status
+		httpErr.RetryAfter = retryAfter
 		recordProviderRequest(req, startedAt, resp.StatusCode, data, httpErr)
 		return nil, "", httpErr
 	}
@@ -360,10 +351,10 @@ func providerPollingDeadline(ctx context.Context) time.Time {
 	return time.Now().Add(videoPollTimeout)
 }
 
-func protocolBusinessFailure(ctx context.Context, metadata providerAnalyticsContext, body []byte) (string, string, bool) {
+func protocolAdapterFromAnalytics(ctx context.Context, metadata providerAnalyticsContext) protocol.Adapter {
 	id := strings.TrimSpace(metadata.InterfaceType)
 	if id == "" {
-		return "", "", false
+		return nil
 	}
 	var adapter protocol.Adapter
 	if metadata.Service != nil {
@@ -372,7 +363,7 @@ func protocolBusinessFailure(ctx context.Context, metadata providerAnalyticsCont
 	if adapter == nil {
 		adapter, _ = protocolAdapterForContext(ctx, id)
 	}
-	return protocol.BusinessFailure(adapter, body)
+	return adapter
 }
 
 func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode int, responseBody []byte, requestErr error) {
@@ -386,14 +377,13 @@ func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode in
 	if requestErr != nil || statusCode < 200 || statusCode >= 300 {
 		status = model.ApiCallStatusFailed
 		errorCode, errorText = providerRequestErrorDetails(requestErr)
-	} else if businessCode, businessMessage, failed := providerResponseBusinessFailure(responseBody); failed {
+	} else if failed, failure := interpretUpstream(protocolAdapterFromAnalytics(req.Context(), metadata), "", statusCode, responseBody); failed {
 		status = model.ApiCallStatusFailed
-		errorCode = businessCode
-		errorText = businessMessage
-	} else if businessCode, businessMessage, failed := protocolBusinessFailure(req.Context(), metadata, responseBody); failed {
-		status = model.ApiCallStatusFailed
-		errorCode = businessCode
-		errorText = businessMessage
+		errorCode = failure.Code
+		errorText = failure.Message
+		if errorText == "" {
+			errorText = safeProviderLogError(failure)
+		}
 	}
 	requestKind := providerRequestKind(req.Method, req.URL.Path)
 	if metadata.RequestKind != "" {
@@ -409,7 +399,7 @@ func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode in
 	callLog := model.ApiCallLog{
 		UserID: metadata.UserID, TraceID: metadata.TraceID, RequestID: metadata.RequestID, ChannelID: metadata.ChannelID, TaskID: metadata.TaskID, BillingOrderID: metadata.BillingOrderID,
 		Source: "backend-task", Capability: metadata.Capability, Operation: metadata.Operation,
-		RequestKind: requestKind, Billable: req.Method == http.MethodPost && requestKind != "cancel",
+		RequestKind: requestKind, Billable: providerRequestIsBillable(req.Method, requestKind),
 		APIFormat: apiFormat, Method: req.Method, Path: req.URL.Path, Model: metadata.Model,
 		Status: status, StatusCode: statusCode, DurationMs: time.Since(startedAt).Milliseconds(),
 		ErrorCode: errorCode, Error: errorText, ConcurrencyLimit: metadata.ConcurrencyLimit, UpstreamURL: req.URL.Scheme + "://" + req.URL.Host + req.URL.Path,
@@ -442,6 +432,18 @@ func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode in
 	}
 }
 
+func providerRequestIsBillable(method, requestKind string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	switch requestKind {
+	case "cancel", "cache-create", "cache-delete":
+		return false
+	default:
+		return true
+	}
+}
+
 func providerRequestErrorDetails(err error) (string, string) {
 	if err == nil {
 		return "", ""
@@ -452,13 +454,30 @@ func providerRequestErrorDetails(err error) (string, string) {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "upstream_timeout", "等待上游响应超时"
 	}
+	var failure providerFailure
+	if errors.As(err, &failure) {
+		code := strings.TrimSpace(failure.Code)
+		text := strings.TrimSpace(failure.Message)
+		if text == "" {
+			text = safeProviderLogError(err)
+		}
+		if code == "" && failure.StatusCode > 0 {
+			code = fmt.Sprintf("http_%d", failure.StatusCode)
+		}
+		return code, truncateRunes(text, 500)
+	}
 	return "", safeProviderLogError(err)
 }
 
 func safeProviderLogError(err error) string {
-	var httpErr providerHTTPError
-	if errors.As(err, &httpErr) {
-		return fmt.Sprintf("上游 HTTP %d", httpErr.StatusCode)
+	var failure providerFailure
+	if errors.As(err, &failure) {
+		if failure.StatusCode > 0 {
+			return fmt.Sprintf("上游 HTTP %d", failure.StatusCode)
+		}
+		if strings.TrimSpace(failure.Message) != "" {
+			return truncateRunes(failure.Message, 500)
+		}
 	}
 	return truncateRunes(err.Error(), 500)
 }

@@ -1254,7 +1254,7 @@ func (s *Service) blockLogicalRouteForFailure(attempt *model.RouteAttempt, taskE
 		key, duration = "channel-model:"+attempt.ChannelModelID, 10*time.Minute
 	} else if attempt.FailureCode == "upstream_429" {
 		key, duration = "channel:"+attempt.ChannelID, 30*time.Second
-		var upstream providerHTTPError
+		var upstream providerFailure
 		if errors.As(taskErr, &upstream) && upstream.RetryAfter > 0 {
 			duration = upstream.RetryAfter
 		}
@@ -1398,7 +1398,7 @@ func routeFailureCode(err error) string {
 	if code, _ := ChannelSlotFailureDetails(err); code != "" {
 		return code
 	}
-	var upstream providerHTTPError
+	var upstream providerFailure
 	if errors.As(err, &upstream) {
 		return fmt.Sprintf("upstream_%d", upstream.StatusCode)
 	}
@@ -1412,7 +1412,7 @@ func safeRouteRejection(err error) bool {
 	if code, _ := ChannelSlotFailureDetails(err); code != "" {
 		return true
 	}
-	var upstream providerHTTPError
+	var upstream providerFailure
 	if errors.As(err, &upstream) {
 		switch upstream.StatusCode {
 		case 401, 403, 404, 429:

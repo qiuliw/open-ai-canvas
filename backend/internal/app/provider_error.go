@@ -1,67 +1,204 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+
+	"infinite-canvas/backend/internal/protocol"
 )
 
 const contentModerationErrorCode = "sensitive_words_detected"
 
 const contentModerationRetryMessage = "内容审核未通过，请修改提示词后重新生成；原任务不能直接重试"
 
-// 只提取供应商明确返回的错误码和短消息，避免把完整响应或用户输入复制到调用日志。
-func providerFailureDetails(payload map[string]any) (string, string) {
-	candidates := make([]map[string]any, 0, 3)
-	for _, key := range []string{"error", "data"} {
-		if nested, ok := payload[key].(map[string]any); ok {
-			candidates = append(candidates, nested)
+// interpretUpstream is the only host entry for upstream response errors
+// (new-api RelayErrorHandler + ResetStatusCode in one call):
+//  1. GeneralError field extract → providerFailure
+//  2. declarative channel config (errorPaths / httpErrors / statusCodeMapping)
+//
+// Non-2xx always failed (Pending only when plugin says so and taskID is set).
+// 2xx fails only on a business-error envelope.
+func interpretUpstream(adapter protocol.Adapter, taskID string, statusCode int, body []byte) (failed bool, failure providerFailure) {
+	failure = providerFailure{StatusCode: statusCode, Body: string(body)}
+	fillGeneralErrorFields(&failure)
+
+	if statusCode < 200 || statusCode >= 300 {
+		if channel, ok := protocol.InterpretResponse(adapter, statusCode, body); ok {
+			applyChannelResponse(taskID, channel, &failure)
 		}
+		return true, failure
 	}
-	// 内层通常是供应商业务错误，外层 code 可能只是 HTTP 包装码。
-	candidates = append(candidates, payload)
+
+	if channel, ok := protocol.InterpretResponse(adapter, statusCode, body); ok {
+		if !channel.Failed {
+			return false, failure
+		}
+		if channel.Code != "" {
+			failure.Code = channel.Code
+		}
+		if channel.Message != "" {
+			failure.Message = channel.Message
+		}
+		// 2xx business envelope is not an HTTP-class failure (avoids "HTTP 200" / upstream_200).
+		failure.StatusCode = 0
+		return true, failure
+	}
+
+	var payload map[string]any
+	if len(body) == 0 || json.Unmarshal(body, &payload) != nil {
+		return false, failure
+	}
+	if code, message, ok := businessEnvelope(payload); ok {
+		if code != "" {
+			failure.Code = code
+		}
+		if message != "" {
+			failure.Message = message
+		}
+		failure.StatusCode = 0
+		return true, failure
+	}
+	return false, failure
+}
+
+// interpretUpstreamErr re-interprets an HTTP-layer providerFailure with channel
+// config (taskID enables Pending → continue original poll).
+func interpretUpstreamErr(adapter protocol.Adapter, taskID string, err error) error {
+	var failure providerFailure
+	if !errors.As(err, &failure) {
+		return err
+	}
+	retryAfter := failure.RetryAfter
+	status := failure.Status
+	_, out := interpretUpstream(adapter, taskID, failure.StatusCode, []byte(failure.Body))
+	out.RetryAfter = retryAfter
+	out.Status = status
+	return out
+}
+
+func analyticsFromContext(ctx context.Context) providerAnalyticsContext {
+	metadata, _ := ctx.Value(providerAnalyticsKey{}).(providerAnalyticsContext)
+	return metadata
+}
+
+func applyChannelResponse(taskID string, channel protocol.ResponseError, failure *providerFailure) {
+	if failure == nil {
+		return
+	}
+	if strings.TrimSpace(channel.Code) != "" {
+		failure.Code = strings.TrimSpace(channel.Code)
+	}
+	if strings.TrimSpace(channel.Message) != "" {
+		failure.Message = strings.TrimSpace(channel.Message)
+	}
+	if channel.Pending {
+		if strings.TrimSpace(taskID) == "" {
+			return
+		}
+		failure.Pending = true
+		failure.TaskID = taskID
+		return
+	}
+	if channel.MappedStatusCode > 0 {
+		failure.StatusCode = channel.MappedStatusCode
+	}
+}
+
+func fillGeneralErrorFields(err *providerFailure) {
+	if err == nil || strings.TrimSpace(err.Body) == "" {
+		return
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(err.Body), &payload) != nil {
+		return
+	}
+	code, message := generalErrorFields(payload)
+	if err.Code == "" {
+		err.Code = code
+	}
+	if err.Message == "" {
+		err.Message = message
+	}
+}
+
+// generalErrorFields mirrors new-api GeneralErrorResponse.ToMessage / TryToOpenAIError.
+func generalErrorFields(payload map[string]any) (string, string) {
 	code := ""
 	message := ""
-	for _, candidate := range candidates {
-		if code == "" {
-			code = normalizedProviderErrorCode(candidate["code"])
+
+	if errorRaw, ok := payload["error"]; ok {
+		switch typed := errorRaw.(type) {
+		case map[string]any:
+			code = normalizedProviderErrorCode(typed["code"])
+			message = firstNonEmptyTrim(
+				stringField(typed, "message"),
+				stringField(typed, "msg"),
+			)
+		case string:
+			message = strings.TrimSpace(typed)
 		}
-		if message == "" {
-			message = strings.TrimSpace(stringField(candidate, "message"))
-			if message == "" {
-				message = strings.TrimSpace(stringField(candidate, "msg"))
+	}
+
+	if code == "" {
+		code = normalizedProviderErrorCode(payload["code"])
+	}
+	if message == "" {
+		message = firstNonEmptyTrim(
+			stringField(payload, "message"),
+			stringField(payload, "msg"),
+			stringField(payload, "err"),
+			stringField(payload, "error_msg"),
+			stringField(payload, "detail"),
+		)
+	}
+	if message == "" {
+		if header, ok := payload["header"].(map[string]any); ok {
+			message = strings.TrimSpace(stringField(header, "message"))
+		}
+	}
+	if message == "" {
+		if response, ok := payload["response"].(map[string]any); ok {
+			if errObj, ok := response["error"].(map[string]any); ok {
+				message = strings.TrimSpace(stringField(errObj, "message"))
+				if code == "" {
+					code = normalizedProviderErrorCode(errObj["code"])
+				}
 			}
 		}
 	}
+
 	return code, truncateRunes(message, 500)
 }
 
-func providerResponseBusinessFailure(responseBody []byte) (string, string, bool) {
-	if len(responseBody) == 0 {
-		return "", "", false
+func firstNonEmptyTrim(values ...string) string {
+	for _, value := range values {
+		if text := strings.TrimSpace(value); text != "" {
+			return text
+		}
 	}
-	var payload map[string]any
-	if json.Unmarshal(responseBody, &payload) != nil {
-		return "", "", false
-	}
-	return providerPayloadBusinessFailure(payload)
+	return ""
 }
 
-func providerPayloadBusinessFailure(payload map[string]any) (string, string, bool) {
+// businessEnvelope detects a business-error JSON envelope when no declarative
+// plugin is bound — same shapes as new-api GeneralErrorResponse.
+func businessEnvelope(payload map[string]any) (string, string, bool) {
 	if errorValue, ok := payload["error"].(map[string]any); ok {
-		code, message := providerFailureDetails(map[string]any{"error": errorValue})
+		code, message := generalErrorFields(map[string]any{"error": errorValue})
 		if code != "" || message != "" {
 			return code, message, true
 		}
 	}
-	if !providerBusinessCodeFailed(payload["code"]) {
+	if !businessCodeFailed(payload["code"]) {
 		return "", "", false
 	}
-	code, message := providerFailureDetails(payload)
+	code, message := generalErrorFields(payload)
 	return code, message, true
 }
 
-func providerBusinessCodeFailed(value any) bool {
+func businessCodeFailed(value any) bool {
 	code := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
 	switch code {
 	case "", "0", "success", "succeeded", "ok", "<nil>":

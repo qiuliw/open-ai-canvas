@@ -246,7 +246,7 @@ func channelModelsUpstreamError(err error) error {
 	if errors.As(err, &authErr) {
 		return authErr
 	}
-	var httpErr providerHTTPError
+	var httpErr providerFailure
 	if !errors.As(err, &httpErr) {
 		return WrapAppError(http.StatusBadGateway, "连接模型服务失败，请检查渠道地址和网络", err)
 	}
