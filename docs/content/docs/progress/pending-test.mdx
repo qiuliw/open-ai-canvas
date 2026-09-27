@@ -7,7 +7,7 @@ description: 当前项目已实现功能的手工验证清单与未确认边界
 
 ## 上游错误解析归一（Issue #634）
 
-- 已实现：对齐 new-api — 唯一入口 `interpretUpstream`（GeneralError 抽码/文 + 插件 `InterpretResponse`）；唯一类型 `providerFailure`；声明式差异只在 manifest `httpErrors`/`statusCodeMapping`/`errorPaths`；NewAPI Channel 2 用 `httpErrors` 声明 `task_not_exist → pending`。
+- 已实现：对齐 new-api — 出站上下文绑定渠道 Adapter（`withProviderChannel` / `ensureProviderChannelContext`）；唯一入口 `interpretUpstream`（GeneralError 抽码/文 + 插件 `protocol.Interpret`）在 `doBinary` 只解释一次；唯一类型 `providerFailure`（`Kind=http|business`）；Pending 由 `ChannelPending` + `attachUpstreamTaskID` 挂上，协议路径不再二次解释；声明式差异只在 manifest；NewAPI Channel 2 用 `httpErrors` 声明 `task_not_exist → pending`。
 - [ ] 真实渠道验收：声明式视频 create/poll 失败时调用日志的 code/message 与任务失败文案一致；NewAPI Channel 2 短暂 `task_not_exist` 继续查原任务；DashScope 嵌套 `output.code` 失败由插件路径识别，不再依赖宿主特判。
 
 ## 声明式协议 HTTP 错误解释

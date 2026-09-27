@@ -13,7 +13,7 @@ import (
 	"infinite-canvas/backend/internal/platform"
 )
 
-const newAPIChannel2TaskSyncMaxAge = 5 * time.Minute
+const videoProviderPendingSyncMaxAge = 5 * time.Minute
 
 // taskWorkerCoordinator 收敛任务领取、租约维护和执行结果落库，避免 Service 同时承担 worker 生命周期与业务命令。
 type taskWorkerCoordinator struct {
@@ -249,8 +249,7 @@ func (w *taskWorkerCoordinator) processClaimedTask(task *model.Task, globalSlot 
 			return leaseErr
 		default:
 		}
-		decryptedInput, decryptErr := s.decryptTaskInputJSON(task.InputJSON)
-		if decryptErr == nil && s.shouldDeferVideoProviderTask(*task, decryptedInput, err) {
+		if s.shouldDeferVideoProviderTask(*task, err) {
 			stage := "后台仍在生成"
 			message := "前台等待结束，上游视频仍在生成，将继续回查原任务"
 			var failure providerFailure
@@ -264,7 +263,7 @@ func (w *taskWorkerCoordinator) processClaimedTask(task *model.Task, globalSlot 
 			_ = s.log(task.UserID, task.ID, "info", message, task.PollStage)
 			return nil
 		}
-		if newAPIChannel2TaskSyncExpired(*task, err, time.Now()) {
+		if videoProviderPendingSyncExpired(*task, err, time.Now()) {
 			err = errors.New("上游任务长时间未同步，已停止自动查询，请确认渠道任务状态后重试。")
 		}
 		if errors.Is(err, context.DeadlineExceeded) || deadlineExpired {
@@ -364,28 +363,26 @@ func taskExecutionTimeoutWithPolicy(taskType string, policy RuntimeTaskPolicy) t
 	}
 }
 
-func (s *Service) shouldDeferVideoProviderTask(task model.Task, decryptedInput string, err error) bool {
+// shouldDeferVideoProviderTask keeps a video task running when the upstream job
+// already exists (ProviderRequestID set): front-end timeout or a bounded pending
+// sync delay must resume the same provider task, never create a second one.
+// Protocol-agnostic — any channel that persisted an upstream ID can poll-only resume.
+func (s *Service) shouldDeferVideoProviderTask(task model.Task, err error) bool {
 	providerRequestID := strings.TrimSpace(task.ProviderRequestID)
 	if providerRequestID == "" || (!strings.HasPrefix(task.Type, "canvas_video") && !strings.HasPrefix(task.Type, "video_")) {
 		return false
 	}
-	deferSignal := errors.Is(err, context.DeadlineExceeded)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
 	var failure providerFailure
 	if errors.As(err, &failure) && failure.Pending {
-		deferSignal = strings.TrimSpace(failure.TaskID) == providerRequestID && !newAPIChannel2TaskSyncExpired(task, err, time.Now())
+		return strings.TrimSpace(failure.TaskID) == providerRequestID && !videoProviderPendingSyncExpired(task, err, time.Now())
 	}
-	if !deferSignal {
-		return false
-	}
-	var input canvasGenerationInput
-	if json.Unmarshal([]byte(decryptedInput), &input) != nil {
-		return false
-	}
-	resolved, resolveErr := s.resolveProviderConfig(input.Config)
-	return resolveErr == nil && resolved.InterfaceType == string(model.ChannelInterfaceNewAPIChannel2)
+	return false
 }
 
-func newAPIChannel2TaskSyncExpired(task model.Task, err error, now time.Time) bool {
+func videoProviderPendingSyncExpired(task model.Task, err error, now time.Time) bool {
 	var failure providerFailure
 	if !errors.As(err, &failure) || !failure.Pending || strings.TrimSpace(failure.TaskID) == "" || strings.TrimSpace(failure.TaskID) != strings.TrimSpace(task.ProviderRequestID) {
 		return false
@@ -393,7 +390,7 @@ func newAPIChannel2TaskSyncExpired(task model.Task, err error, now time.Time) bo
 	if task.StartedAt == nil {
 		return true
 	}
-	return !now.Before(task.StartedAt.Add(newAPIChannel2TaskSyncMaxAge))
+	return !now.Before(task.StartedAt.Add(videoProviderPendingSyncMaxAge))
 }
 
 func taskTimeoutMessage(taskType string) string {

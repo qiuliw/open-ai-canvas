@@ -59,6 +59,9 @@ func declarativeProtocolPollPolicy(mode string) videoPollPolicy {
 func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGenerationInput, adapter protocol.Adapter, policy videoPollPolicy) (map[string]interface{}, error) {
 	// create、poll、download 是同一个外部任务的三个阶段：任一阶段失败都向上返回真实错误，
 	// 不把“已提交但结果未知”伪装成成功，也不把下载失败降级成空结果。
+	// Outbound shares doBinary; bind the channel adapter before any request so
+	// interpretUpstream runs once with the same plugin that built the request.
+	ctx = withProviderChannel(ctx, input.Config, adapter)
 	request := protocolRequestFromInput(input)
 	taskID := resumedProviderRequestID(ctx)
 	var created protocol.CreateResult
@@ -76,7 +79,7 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 		}
 		body, streamedResult, err := executeProtocolCreateRequest(withProviderRequestKind(ctx, "create"), input, spec)
 		if err != nil {
-			return nil, interpretUpstreamErr(adapter, "", err)
+			return nil, err
 		}
 		if streamedResult != nil {
 			created = protocol.CreateResult{Status: protocol.StatusSucceeded, Result: streamedResult}
@@ -112,7 +115,7 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 		}
 		body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
 		if err != nil {
-			return videoPollOutcome{}, interpretUpstreamErr(adapter, taskID, err)
+			return videoPollOutcome{}, attachUpstreamTaskID(err, taskID)
 		}
 		state, err := adapter.ParsePoll(ctx, protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}, body)
 		if err != nil {
@@ -156,6 +159,7 @@ func extractProviderTaskID(body []byte) (string, error) {
 // queryProtocolAdapterVideoTask 只读取一次已有的声明式 Provider 任务。
 // 人工恢复走此路径，因此检查本地失败任务时绝不会创建第二个计费任务。
 func queryProtocolAdapterVideoTask(ctx context.Context, input canvasGenerationInput, adapter protocol.Adapter, taskID string) (map[string]interface{}, string, error) {
+	ctx = withProviderChannel(ctx, input.Config, adapter)
 	request := protocolRequestFromInput(input)
 	pollContext := protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}
 	spec, err := adapter.BuildPoll(ctx, pollContext)
@@ -164,7 +168,7 @@ func queryProtocolAdapterVideoTask(ctx context.Context, input canvasGenerationIn
 	}
 	body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
 	if err != nil {
-		return nil, "", interpretUpstreamErr(adapter, taskID, err)
+		return nil, "", attachUpstreamTaskID(err, taskID)
 	}
 	state, err := adapter.ParsePoll(ctx, pollContext, body)
 	if err != nil {
@@ -335,6 +339,9 @@ func executeProtocolBinaryRequestWithConsumer(ctx context.Context, config provid
 	if err := spec.Validate(); err != nil {
 		return nil, "", err
 	}
+	// Every protocol outbound is channel-bound: InterfaceType (+ Adapter when known)
+	// must ride on the request context into doBinary.
+	ctx = ensureProviderChannelContext(ctx, config)
 	method := strings.ToUpper(strings.TrimSpace(spec.Method))
 	body, contentType, err := protocolRequestBody(ctx, config, spec)
 	if err != nil {
@@ -950,19 +957,13 @@ func protocolResultError(message, taskID string) error {
 }
 
 func validateGenerationInterface(mode string, interfaceType string) error {
-	// Standalone callers (including legacy tests and migration tools) may not
-	// have a Service/plugin runtime. Use the shipped declarative catalog first;
-	// fall back to host builtins only when the package catalog is unavailable.
 	registry := loadOfficialFallbackRegistry()
 	if registry == nil {
-		registry = protocol.Builtins()
-	} else if _, ok := registry.Resolve(strings.TrimSpace(interfaceType)); !ok {
-		// A deployment may ship only a subset of the optional plugin catalog.
-		// Preserve the host-backed builtins for standalone validation instead of
-		// reporting a false "not installed" error for those interfaces.
-		if _, builtinOK := protocol.Builtins().Resolve(strings.TrimSpace(interfaceType)); builtinOK {
-			registry = protocol.Builtins()
+		interfaceType = strings.TrimSpace(interfaceType)
+		if interfaceType == "" {
+			return nil
 		}
+		return fmt.Errorf("接口类型 %s 未安装", interfaceType)
 	}
 	return validateGenerationInterfaceWithRegistry(registry, mode, interfaceType)
 }

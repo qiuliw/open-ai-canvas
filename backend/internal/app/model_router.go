@@ -1400,6 +1400,9 @@ func routeFailureCode(err error) string {
 	}
 	var upstream providerFailure
 	if errors.As(err, &upstream) {
+		if upstream.Kind == providerFailureBusiness {
+			return "upstream_business"
+		}
 		return fmt.Sprintf("upstream_%d", upstream.StatusCode)
 	}
 	return "submission_unknown"

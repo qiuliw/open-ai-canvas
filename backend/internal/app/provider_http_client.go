@@ -26,6 +26,7 @@ import (
 )
 
 func postGeminiJSON(ctx context.Context, config providerConfig, path string, body interface{}, target interface{}) error {
+	ctx = ensureProviderChannelContext(ctx, config)
 	data, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("序列化上游请求失败：%w", err)
@@ -41,6 +42,7 @@ func postGeminiJSON(ctx context.Context, config providerConfig, path string, bod
 }
 
 func getGeminiJSON(ctx context.Context, config providerConfig, path string, target interface{}) error {
+	ctx = ensureProviderChannelContext(ctx, config)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, geminiVeoURL(config.BaseURL, path), nil)
 	if err != nil {
 		return err
@@ -65,6 +67,7 @@ func geminiVeoURL(baseURL string, path string) string {
 }
 
 func postStreamingBinary(ctx context.Context, config providerConfig, path string, body interface{}, onChunk func(string, []byte)) ([]byte, string, error) {
+	ctx = ensureProviderChannelContext(ctx, config)
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, "", fmt.Errorf("序列化上游请求失败：%w", err)
@@ -81,6 +84,7 @@ func postStreamingBinary(ctx context.Context, config providerConfig, path string
 }
 
 func postJSON(ctx context.Context, config providerConfig, path string, body interface{}, target interface{}) error {
+	ctx = ensureProviderChannelContext(ctx, config)
 	data, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("序列化上游请求失败：%w", err)
@@ -109,6 +113,7 @@ func applyProviderAuth(req *http.Request, config providerConfig) {
 }
 
 func postForm(ctx context.Context, config providerConfig, path string, contentType string, body io.Reader, target interface{}) error {
+	ctx = ensureProviderChannelContext(ctx, config)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL(config.BaseURL, path), body)
 	if err != nil {
 		return err
@@ -120,6 +125,7 @@ func postForm(ctx context.Context, config providerConfig, path string, contentTy
 }
 
 func getJSON(ctx context.Context, config providerConfig, path string, target interface{}) error {
+	ctx = ensureProviderChannelContext(ctx, config)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL(config.BaseURL, path), nil)
 	if err != nil {
 		return err
@@ -193,10 +199,6 @@ func doJSON(req *http.Request, target interface{}) error {
 	}
 	if err := json.Unmarshal(data, target); err != nil {
 		return providerResponseDecodeError{Err: err}
-	}
-	adapter := protocolAdapterFromAnalytics(req.Context(), analyticsFromContext(req.Context()))
-	if failed, failure := interpretUpstream(adapter, "", http.StatusOK, data); failed {
-		return failure
 	}
 	return nil
 }
@@ -310,11 +312,20 @@ func doBinaryWithConsumer(req *http.Request, onChunk func(string, []byte)) ([]by
 		}
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 		adapter := protocolAdapterFromAnalytics(req.Context(), analyticsFromContext(req.Context()))
-		_, httpErr := interpretUpstream(adapter, "", resp.StatusCode, data)
+		_, httpErr := interpretUpstream(adapter, resp.StatusCode, data)
 		httpErr.Status = resp.Status
 		httpErr.RetryAfter = retryAfter
 		recordProviderRequest(req, startedAt, resp.StatusCode, data, httpErr)
 		return nil, "", httpErr
+	}
+	adapter := protocolAdapterFromAnalytics(req.Context(), analyticsFromContext(req.Context()))
+	if failed, failure := interpretUpstream(adapter, resp.StatusCode, data); failed {
+		if runtimeService != nil {
+			_ = runtimeService.RecordChannelResult(req.Context(), channelID, false)
+		}
+		failure.Status = resp.Status
+		recordProviderRequest(req, startedAt, resp.StatusCode, data, failure)
+		return nil, "", failure
 	}
 	recordProviderRequest(req, startedAt, resp.StatusCode, data, nil)
 	if runtimeService != nil {
@@ -352,6 +363,13 @@ func providerPollingDeadline(ctx context.Context) time.Time {
 }
 
 func protocolAdapterFromAnalytics(ctx context.Context, metadata providerAnalyticsContext) protocol.Adapter {
+	if metadata.Adapter != nil {
+		return metadata.Adapter
+	}
+	return resolveProtocolAdapter(ctx, metadata)
+}
+
+func resolveProtocolAdapter(ctx context.Context, metadata providerAnalyticsContext) protocol.Adapter {
 	id := strings.TrimSpace(metadata.InterfaceType)
 	if id == "" {
 		return nil
@@ -377,13 +395,6 @@ func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode in
 	if requestErr != nil || statusCode < 200 || statusCode >= 300 {
 		status = model.ApiCallStatusFailed
 		errorCode, errorText = providerRequestErrorDetails(requestErr)
-	} else if failed, failure := interpretUpstream(protocolAdapterFromAnalytics(req.Context(), metadata), "", statusCode, responseBody); failed {
-		status = model.ApiCallStatusFailed
-		errorCode = failure.Code
-		errorText = failure.Message
-		if errorText == "" {
-			errorText = safeProviderLogError(failure)
-		}
 	}
 	requestKind := providerRequestKind(req.Method, req.URL.Path)
 	if metadata.RequestKind != "" {

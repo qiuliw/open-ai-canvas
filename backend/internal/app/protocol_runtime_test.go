@@ -653,23 +653,23 @@ func TestDeclarativeMiniMaxFailureReachesTaskError(t *testing.T) {
 	}
 }
 
-func TestDeclarativeInterpretResponse(t *testing.T) {
+func TestDeclarativeInterpret(t *testing.T) {
 	adapter := newDeclarativeNewAPIChannel2TestAdapter(t)
 	if !protocol.IsManifestAdapter(adapter) {
 		t.Fatal("declarative adapter must be a manifest adapter")
 	}
 
-	pending, handled := protocol.InterpretResponse(adapter, http.StatusBadRequest, []byte(`{"code":"task_not_exist","message":"task_not_exist"}`))
+	pending, handled := protocol.Interpret(adapter, http.StatusBadRequest, []byte(`{"code":"task_not_exist","message":"task_not_exist"}`))
 	if !handled || !pending.Failed || !pending.Pending || pending.Code != "task_not_exist" {
 		t.Fatalf("pending interpretation = %#v handled=%v", pending, handled)
 	}
 
-	failed, handled := protocol.InterpretResponse(adapter, http.StatusBadRequest, []byte(`{"code":"invalid_parameter","message":"bad size"}`))
+	failed, handled := protocol.Interpret(adapter, http.StatusBadRequest, []byte(`{"code":"invalid_parameter","message":"bad size"}`))
 	if !handled || !failed.Failed || failed.Pending || failed.Message != "bad size" {
 		t.Fatalf("failed interpretation = %#v handled=%v", failed, handled)
 	}
 
-	mapped, handled := protocol.InterpretResponse(adapter, http.StatusBadRequest, []byte(`{"code":"upstream_busy"}`))
+	mapped, handled := protocol.Interpret(adapter, http.StatusBadRequest, []byte(`{"code":"upstream_busy"}`))
 	if !handled || !mapped.Failed || mapped.MappedStatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("mapped interpretation = %#v handled=%v", mapped, handled)
 	}

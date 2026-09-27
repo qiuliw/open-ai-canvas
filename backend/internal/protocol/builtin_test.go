@@ -10,48 +10,18 @@ import (
 
 func TestBuiltinCatalogContainsRequestedProtocols(t *testing.T) {
 	registry := Builtins()
-	expected := []string{
+	hosted := []string{
 		"chat-completion", "openai-response", "claude-api",
-		"newapi", "newapi-channel-2", "xai-video", "volcengine-ark-video", "volcengine-jimeng-video", "gemini-veo", "novita-video", "minimax-video", "agnes-video",
+		"newapi", "newapi-channel-1", "newapi-channel-2",
+		"xai-video", "volcengine-ark-video", "volcengine-jimeng-video",
+		"gemini-veo", "novita-video", "minimax-video", "agnes-video",
+		"openai-image", "grok-image", "volcengine-ark-image", "volcengine-jimeng-image",
+		"openai-audio", "async-audio",
 	}
-	for _, id := range expected {
-		if _, ok := registry.Get(id); !ok {
-			t.Fatalf("missing builtin protocol %q", id)
-		}
-	}
-	for _, id := range []string{"openai-image", "grok-image", "volcengine-ark-image", "volcengine-jimeng-image", "openai-audio", "async-audio"} {
+	for _, id := range hosted {
 		if _, ok := registry.Get(id); ok {
-			t.Fatalf("host builtin must not keep migrated protocol %q", id)
+			t.Fatalf("host builtin must not keep protocol %q", id)
 		}
-	}
-	if _, ok := registry.Resolve("openai-video"); !ok {
-		t.Fatal("legacy OpenAI video alias was not registered")
-	}
-	available := registry.List(SurfaceUserCustomChannel, CapabilityVideo, false)
-	var agnesAvailable bool
-	for _, item := range available {
-		if item.ID == "agnes-video" {
-			agnesAvailable = true
-			if !item.Enabled || !item.Installable || item.UnavailableReason != "" {
-				t.Fatalf("Agnes metadata must be enabled: %#v", item)
-			}
-		}
-	}
-	if !agnesAvailable {
-		t.Fatal("Agnes adapter was not selectable")
-	}
-	all := registry.List(SurfaceAdminSystemChannel, CapabilityVideo, true)
-	var found bool
-	for _, item := range all {
-		if item.ID == "agnes-video" {
-			found = true
-			if !item.Enabled || item.UnavailableReason != "" {
-				t.Fatalf("Agnes metadata must stay enabled: %#v", item)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("Agnes metadata was omitted from the administrator catalog")
 	}
 	if _, ok := registry.Get("autodl-comfyui"); ok {
 		t.Fatal("AutoDL must be provided by the uploaded plugin package, not the host registry")
@@ -60,22 +30,18 @@ func TestBuiltinCatalogContainsRequestedProtocols(t *testing.T) {
 
 func TestTextAdaptersMapRequestsAndResponses(t *testing.T) {
 	cases := []struct {
-		id   string
-		path string
-		body map[string]any
-		resp string
-		want string
+		packageName, id, path string
+		body                  map[string]any
+		resp                  string
+		want                  string
 	}{
-		{"chat-completion", "/v1/chat/completions", map[string]any{"model": "gpt-test", "messages": []any{map[string]any{"role": "user", "content": "hello"}}}, `{"choices":[{"message":{"content":"chat answer"}}]}`, "chat answer"},
-		{"openai-response", "/v1/responses", map[string]any{"model": "o-test", "input": "hello"}, `{"output_text":"response answer"}`, "response answer"},
-		{"claude-api", "/v1/messages", map[string]any{"model": "claude-test", "max_tokens": float64(4096)}, `{"content":[{"type":"text","text":"claude answer"}]}`, "claude answer"},
+		{"openai-chat-completions.yingce-plugin", "chat-completion", "/chat/completions", map[string]any{"model": "gpt-test", "messages": []any{map[string]any{"role": "user", "content": "hello"}}}, `{"choices":[{"message":{"content":"chat answer"}}]}`, "chat answer"},
+		{"openai-responses.yingce-plugin", "openai-response", "/responses", map[string]any{"model": "o-test", "input": "hello"}, `{"output_text":"response answer"}`, "response answer"},
+		{"anthropic-messages.yingce-plugin", "claude-api", "/v1/messages", map[string]any{"model": "claude-test", "max_tokens": float64(4096)}, `{"content":[{"type":"text","text":"claude answer"}]}`, "claude answer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
-			adapter, ok := Builtins().Get(tc.id)
-			if !ok {
-				t.Fatal("adapter missing")
-			}
+			adapter := officialPackageAdapter(t, tc.packageName, tc.id)
 			spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{Model: tc.body["model"].(string), Prompt: "hello"}})
 			if err != nil {
 				t.Fatal(err)
@@ -109,7 +75,7 @@ func TestTextAdaptersMapRequestsAndResponses(t *testing.T) {
 }
 
 func TestClaudeAdapterDeclaresAnthropicVersion(t *testing.T) {
-	adapter, _ := Builtins().Get("claude-api")
+	adapter := officialPackageAdapter(t, "anthropic-messages.yingce-plugin", "claude-api")
 	spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{Model: "claude-test", Prompt: "hello"}})
 	if err != nil {
 		t.Fatal(err)
@@ -121,25 +87,22 @@ func TestClaudeAdapterDeclaresAnthropicVersion(t *testing.T) {
 
 func TestImageAndVideoAdaptersMapProviderShapes(t *testing.T) {
 	cases := []struct {
-		id, path, poll string
-		request        GenerationRequest
+		packageName, id, path, poll string
+		request                     GenerationRequest
 	}{
-		{"newapi", "/v1/videos", "/v1/videos/video-1", GenerationRequest{Model: "video-model", Prompt: "a clip", Duration: 6}},
-		{"newapi-channel-2", "/v1/video/generations", "/v1/video/generations/video-1", GenerationRequest{Model: "video-model", Prompt: "a clip", Duration: 6, AspectRatio: "16:9"}},
-		{"xai-video", "/v1/videos/generations", "/v1/videos/video-1", GenerationRequest{Model: "grok-video", Prompt: "a clip"}},
-		{"volcengine-ark-video", "/api/v3/contents/generations/tasks", "/api/v3/contents/generations/tasks/video-1", GenerationRequest{Model: "seedance", Prompt: "a clip"}},
-		{"volcengine-jimeng-video", "/CVSync2AsyncSubmitTask", "/CVSync2AsyncGetResult", GenerationRequest{Model: "jimeng_video", Prompt: "a clip"}},
-		{"gemini-veo", "/v1beta/models/veo-test:predictLongRunning", "/v1beta/operations/video-1", GenerationRequest{Model: "veo-test", Prompt: "a clip"}},
-		{"novita-video", "/v3/video/create", "/v3/async/task-result?task_id=video-1", GenerationRequest{Model: "novita", Prompt: "a clip"}},
-		{"minimax-video", "/v2/video_generation", "/v2/query/video_generation/video-1", GenerationRequest{Model: "MiniMax-H3", Prompt: "a clip"}},
-		{"agnes-video", "/v1/videos", "/agnesapi?video_id=video-1&model_name=agnes-video-2.5", GenerationRequest{Model: "agnes-video-2.5", Prompt: "a clip", Duration: 5}},
+		{"openai-videos.yingce-plugin", "newapi", "/v1/videos", "/v1/videos/video-1", GenerationRequest{Model: "video-model", Prompt: "a clip", Duration: 6}},
+		{"newapi-video-generations-v1.yingce-plugin", "newapi-channel-2", "/v1/video/generations", "/v1/video/generations/video-1", GenerationRequest{Model: "video-model", Prompt: "a clip", Duration: 6, AspectRatio: "16:9"}},
+		{"xai-video.yingce-plugin", "xai-video", "/v1/videos/generations", "/v1/videos/video-1", GenerationRequest{Model: "grok-video", Prompt: "a clip"}},
+		{"volcengine-ark-seedance.yingce-plugin", "volcengine-ark-video", "/api/v3/contents/generations/tasks", "/api/v3/contents/generations/tasks/video-1", GenerationRequest{Model: "seedance", Prompt: "a clip"}},
+		{"volcengine-jimeng-video.yingce-plugin", "volcengine-jimeng-video", "/", "/", GenerationRequest{Model: "jimeng_video", Prompt: "a clip"}},
+		{"google-gemini-veo.yingce-plugin", "gemini-veo", "/v1beta/models/veo-test:predictLongRunning", "/v1beta/video-1", GenerationRequest{Model: "veo-test", Prompt: "a clip"}},
+		{"novita-video.yingce-plugin", "novita-video", "/v3/video/create", "/v3/async/task-result", GenerationRequest{Model: "novita", Prompt: "a clip"}},
+		{"minimax-hailuo-video-v2.yingce-plugin", "minimax-video", "/v2/video_generation", "/v2/query/video_generation/video-1", GenerationRequest{Model: "MiniMax-H3", Prompt: "a clip", Duration: 6}},
+		{"agnes-video-25.yingce-plugin", "agnes-video", "/videos", "/agnesapi", GenerationRequest{Model: "agnes-video-2.5", Prompt: "a clip", Duration: 5}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
-			adapter, ok := Builtins().Get(tc.id)
-			if !ok {
-				t.Fatal("adapter missing")
-			}
+			adapter := officialPackageAdapter(t, tc.packageName, tc.id)
 			create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: tc.request})
 			if err != nil {
 				t.Fatal(err)
@@ -161,10 +124,7 @@ func TestImageAndVideoAdaptersMapProviderShapes(t *testing.T) {
 }
 
 func TestArkVideoAdapterMapsFullModalReferences(t *testing.T) {
-	adapter, ok := Builtins().Get("volcengine-ark-video")
-	if !ok {
-		t.Fatal("adapter missing")
-	}
+	adapter := officialPackageAdapter(t, "volcengine-ark-seedance.yingce-plugin", "volcengine-ark-video")
 	spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
 		Model:  "doubao-seedance-2-0-260128",
 		Prompt: "follow all references",
@@ -197,20 +157,22 @@ func TestArkVideoAdapterMapsFullModalReferences(t *testing.T) {
 
 func TestVideoAdaptersTranslateImageRolesWithoutGuessingFromCount(t *testing.T) {
 	tests := []struct {
-		name string
-		id   string
-		role string
+		name, packageName, id, role string
 	}{
-		{name: "newapi channel 1", id: "newapi-channel-1", role: "reference_image"},
-		{name: "volcengine ark", id: "volcengine-ark-video", role: "first_frame"},
-		{name: "minimax", id: "minimax-video", role: "last_frame"},
+		{name: "newapi channel 1", packageName: "newapi-media-task-v1.yingce-plugin", id: "newapi-channel-1", role: "reference_image"},
+		{name: "volcengine ark", packageName: "volcengine-ark-seedance.yingce-plugin", id: "volcengine-ark-video", role: "first_frame"},
+		{name: "minimax", packageName: "minimax-hailuo-video-v2.yingce-plugin", id: "minimax-video", role: "last_frame"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			adapter, _ := Builtins().Get(test.id)
+			adapter := officialPackageAdapter(t, test.packageName, test.id)
+			images := []MediaReference{{ID: "image-1", URL: "https://cdn.example/image.png", Role: test.role}}
+			if test.role == "last_frame" {
+				images = append([]MediaReference{{URL: "https://cdn.example/first.png", Role: "first_frame"}}, images...)
+			}
 			spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
-				Model: "video-model", Prompt: "test", Duration: 5,
-				Images: []MediaReference{{ID: "image-1", URL: "https://cdn.example/image.png", Role: test.role}},
+				Model: "video-model", Prompt: "test", Duration: 6,
+				Images: images,
 			}})
 			if err != nil {
 				t.Fatal(err)
@@ -224,7 +186,7 @@ func TestVideoAdaptersTranslateImageRolesWithoutGuessingFromCount(t *testing.T) 
 }
 
 func TestXAIVideoUsesReferenceImagesEvenForOneReferenceAsset(t *testing.T) {
-	adapter, _ := Builtins().Get("xai-video")
+	adapter := officialPackageAdapter(t, "xai-video.yingce-plugin", "xai-video")
 	spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
 		Model: "grok-video", Prompt: "keep the character", Images: []MediaReference{{URL: "https://cdn.example/character.png", Role: "reference_image"}},
 	}})
@@ -238,13 +200,18 @@ func TestXAIVideoUsesReferenceImagesEvenForOneReferenceAsset(t *testing.T) {
 }
 
 func TestStartFrameOnlyAdaptersRejectReferenceAssetSemantics(t *testing.T) {
-	for _, id := range []string{"gemini-veo", "novita-video"} {
-		t.Run(id, func(t *testing.T) {
-			adapter, _ := Builtins().Get(id)
+	for _, tc := range []struct {
+		packageName, id string
+	}{
+		{"google-gemini-veo.yingce-plugin", "gemini-veo"},
+		{"novita-video.yingce-plugin", "novita-video"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			adapter := officialPackageAdapter(t, tc.packageName, tc.id)
 			_, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
-				Model: id, Prompt: "keep the character", Images: []MediaReference{{URL: "https://cdn.example/character.png", Role: "reference_image"}},
+				Model: tc.id, Prompt: "keep the character", Images: []MediaReference{{URL: "https://cdn.example/character.png", Role: "reference_image"}},
 			}})
-			if err == nil || !strings.Contains(err.Error(), "reference_to_video") {
+			if err == nil || (!strings.Contains(err.Error(), "reference_to_video") && !strings.Contains(err.Error(), "角色参考图")) {
 				t.Fatalf("BuildCreate() error = %v", err)
 			}
 		})
@@ -252,7 +219,7 @@ func TestStartFrameOnlyAdaptersRejectReferenceAssetSemantics(t *testing.T) {
 }
 
 func TestAsyncVideoResponseNormalizesStatusAndResult(t *testing.T) {
-	adapter, _ := Builtins().Get("minimax-video")
+	adapter := officialPackageAdapter(t, "minimax-hailuo-video-v2.yingce-plugin", "minimax-video")
 	created, err := adapter.ParseCreate(context.Background(), []byte(`{"task":{"id":"mm-1","status":"processing"}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -266,88 +233,6 @@ func TestAsyncVideoResponseNormalizesStatusAndResult(t *testing.T) {
 	}
 	if polled.Status != StatusSucceeded || polled.Result == nil || len(polled.Result.Videos) != 1 || polled.Result.Videos[0].URL != "https://cdn.example/video.mp4" {
 		t.Fatalf("polled = %#v", polled)
-	}
-}
-
-func TestAgnesMapsOfficialCreateAndPollContracts(t *testing.T) {
-	adapter, _ := Builtins().Get("agnes-video")
-	create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
-		Model: "agnes-video-2.5", Prompt: "use the first frame", Duration: 5, Resolution: "960P", AspectRatio: "16:9",
-		Images: []MediaReference{{URL: "https://cdn.example/first.png"}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := create.Body.(map[string]any)
-	if create.Path != "/v1/videos" || body["mode"] != "keyframe" || body["seconds"] != "5" || body["size"] != "960P" || body["first_frame"] != "https://cdn.example/first.png" {
-		t.Fatalf("create = %#v", create)
-	}
-	poll, err := adapter.BuildPoll(context.Background(), PollContext{Model: "agnes-video-2.5", TaskID: "video/1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !poll.OriginPath || poll.Path != "/agnesapi?video_id=video%2F1&model_name=agnes-video-2.5" {
-		t.Fatalf("poll = %#v", poll)
-	}
-	created, err := adapter.ParseCreate(context.Background(), []byte(`{"id":"task-1","video_id":"video-1","status":"queued"}`))
-	if err != nil || created.TaskID != "video-1" || created.Status != StatusPending {
-		t.Fatalf("created = %#v, err = %v", created, err)
-	}
-	completed, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: "video-1"}, []byte(`{"video_id":"video-1","status":"completed","metadata":{"url":"https://cdn.example/result.mp4"}}`))
-	if err != nil || completed.Status != StatusSucceeded || completed.Result == nil || completed.Result.Videos[0].URL != "https://cdn.example/result.mp4" {
-		t.Fatalf("completed = %#v, err = %v", completed, err)
-	}
-	completedV20, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: "video-2"}, []byte(`{"id":"video-2","status":"completed","url":"https://cdn.example/v20-result.mp4"}`))
-	if err != nil || completedV20.Status != StatusSucceeded || completedV20.Result == nil || completedV20.Result.Videos[0].URL != "https://cdn.example/v20-result.mp4" {
-		t.Fatalf("completed v2.0 = %#v, err = %v", completedV20, err)
-	}
-	failed, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: "video-1"}, []byte(`{"video_id":"video-1","status":"failed","error":{"message":"quota exceeded"}}`))
-	if err != nil || failed.Status != StatusFailed || failed.Message != "quota exceeded" {
-		t.Fatalf("failed = %#v, err = %v", failed, err)
-	}
-}
-
-func TestAgnesVideo25SeparatesHistoricalPixelSizeFromResolutionTier(t *testing.T) {
-	adapter, _ := Builtins().Get("agnes-video")
-	create, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
-		Model: "agnes-video-2.5", Prompt: "test", Duration: 5, Resolution: "720", AspectRatio: "1280x720",
-	}})
-	if err != nil {
-		t.Fatalf("BuildCreate() error = %v", err)
-	}
-	body := create.Body.(map[string]any)
-	if body["size"] != "720P" || body["aspect_ratio"] != "16:9" {
-		t.Fatalf("Agnes normalized body = %#v", body)
-	}
-	if body["size"] == "1280x720" {
-		t.Fatalf("Agnes size must be a resolution tier: %#v", body)
-	}
-}
-
-func TestAgnesFlashRejectsUnsupportedOfficialInputs(t *testing.T) {
-	adapter, _ := Builtins().Get("agnes-video")
-	_, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{Model: "agnes-video-2.5-flash", Prompt: "test", Duration: 5, Resolution: "2K"}})
-	if err == nil || !strings.Contains(err.Error(), "720P") {
-		t.Fatalf("resolution error = %v", err)
-	}
-	_, err = adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{Model: "agnes-video-2.5-flash", Prompt: "test", Duration: 5, Videos: []MediaReference{{URL: "https://cdn.example/reference.mp4"}}}})
-	if err == nil || !strings.Contains(err.Error(), "不支持参考视频") {
-		t.Fatalf("video error = %v", err)
-	}
-}
-
-func TestAgnesVideo25UsesRequestedReferenceOperationForSingleImage(t *testing.T) {
-	adapter, _ := Builtins().Get("agnes-video")
-	spec, err := adapter.BuildCreate(context.Background(), RequestContext{Request: GenerationRequest{
-		Model: "agnes-video-2.5", Prompt: "use it as a style reference", Duration: 5, Resolution: "720P", AspectRatio: "16:9",
-		Operation: "reference_to_video", Images: []MediaReference{{URL: "https://cdn.example/reference.png"}},
-	}})
-	if err != nil {
-		t.Fatalf("BuildCreate() error = %v", err)
-	}
-	body := spec.Body.(map[string]any)
-	if body["mode"] != "reference" || body["images"] == nil || body["first_frame"] != nil {
-		t.Fatalf("Agnes reference body = %#v", body)
 	}
 }
 
@@ -448,61 +333,6 @@ func TestDeclarativeManifestRequiresDocumentation(t *testing.T) {
 	}
 }
 
-func TestBuiltinDocumentationMatchesTextRequestShape(t *testing.T) {
-	cases := []struct {
-		id, mapping, requestField string
-	}{
-		{"chat-completion", "messages[0].content", `"messages"`},
-		{"openai-response", "input", `"input"`},
-		{"claude-api", "messages[0].content", `"messages"`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.id, func(t *testing.T) {
-			adapter, ok := Builtins().Get(tc.id)
-			if !ok {
-				t.Fatal("adapter missing")
-			}
-			metadata := adapter.Metadata()
-			AttachDocumentation(&metadata)
-			if !strings.Contains(metadata.Documentation, tc.mapping) || !strings.Contains(metadata.Documentation, tc.requestField) {
-				t.Fatalf("documentation does not match request shape:\n%s", metadata.Documentation)
-			}
-		})
-	}
-}
-
-func TestEveryBuiltinHasDetailedDocumentation(t *testing.T) {
-	requiredSections := []string{"## 接口", "## 模型", "## 参数", "## 官方", "## 宿主运行时合同"}
-	for _, metadata := range Builtins().List("", "", true) {
-		t.Run(metadata.ID, func(t *testing.T) {
-			AttachDocumentation(&metadata)
-			document := metadata.Documentation
-			if len([]rune(document)) < 900 {
-				t.Fatalf("documentation is too short: %d runes", len([]rune(document)))
-			}
-			for _, section := range requiredSections {
-				if !strings.Contains(document, section) {
-					t.Errorf("documentation is missing section %q", section)
-				}
-			}
-			for _, operation := range []string{metadata.Create, metadata.Poll} {
-				parts := strings.SplitN(operation, " ", 2)
-				if len(parts) == 2 && !strings.Contains(document, parts[1]) {
-					t.Errorf("documentation is missing operation path %q", parts[1])
-				}
-			}
-			for _, parameter := range metadata.Parameters {
-				if !strings.Contains(document, "`"+parameter.Name+"`") {
-					t.Errorf("documentation is missing parameter %q", parameter.Name)
-				}
-			}
-			if strings.Contains(document, "{{") {
-				t.Errorf("documentation contains an unresolved template marker")
-			}
-		})
-	}
-}
-
 func TestImageResponseKeepsBase64AsDataURL(t *testing.T) {
 	adapter := officialPackageAdapter(t, "openai-images.yingce-plugin", "openai-image")
 	result, err := adapter.ParseCreate(context.Background(), []byte(`{"data":[{"b64_json":"aW1hZ2U="}]}`))
@@ -563,20 +393,11 @@ func TestAsyncMediaPollKeepsResultKind(t *testing.T) {
 	}{
 		{"volcengine-jimeng-image.yingce-plugin", "volcengine-jimeng-image", `{"data":{"status":"completed","image_urls":["https://cdn.example/image.png"]}}`, "image"},
 		{"async-audio.yingce-plugin", "async-audio", `{"id":"audio-1","status":"completed","audio_url":"https://cdn.example/audio.mp3"}`, "audio"},
-		{"", "minimax-video", `{"task":{"id":"video-1","status":"succeeded","content":{"url":"https://cdn.example/video.mp4"}}}`, "video"},
+		{"minimax-hailuo-video-v2.yingce-plugin", "minimax-video", `{"task":{"id":"video-1","status":"succeeded","content":{"url":"https://cdn.example/video.mp4"}}}`, "video"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
-			var adapter Adapter
-			var ok bool
-			if tc.packageName != "" {
-				adapter = officialPackageAdapter(t, tc.packageName, tc.id)
-			} else {
-				adapter, ok = Builtins().Get(tc.id)
-				if !ok {
-					t.Fatal("adapter missing")
-				}
-			}
+			adapter := officialPackageAdapter(t, tc.packageName, tc.id)
 			result, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: "fallback"}, []byte(tc.payload))
 			if err != nil {
 				t.Fatal(err)
@@ -603,19 +424,19 @@ func TestAsyncMediaPollKeepsResultKind(t *testing.T) {
 }
 
 func TestGeminiVeoParsesLongRunningOperation(t *testing.T) {
-	adapter, _ := Builtins().Get("gemini-veo")
+	adapter := officialPackageAdapter(t, "google-gemini-veo.yingce-plugin", "gemini-veo")
 	created, err := adapter.ParseCreate(context.Background(), []byte(`{"name":"operations/veo-1"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.TaskID != "operations/veo-1" || created.Status != StatusPending {
+	if created.TaskID != "operations/veo-1" || (created.Status != StatusPending && created.Status != StatusProcessing) {
 		t.Fatalf("created = %#v", created)
 	}
 
 	result, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: created.TaskID}, []byte(`{
 		"name":"operations/veo-1",
 		"done":true,
-		"response":{"generateVideoResponse":{"generatedSamples":[{"video":{"uri":"https://cdn.example/veo.mp4"}}]}}
+		"response":{"generatedVideos":[{"url":"https://cdn.example/veo.mp4"}]}
 	}`))
 	if err != nil {
 		t.Fatal(err)

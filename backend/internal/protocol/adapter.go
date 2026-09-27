@@ -15,7 +15,8 @@ type Adapter interface {
 
 // ResponseError is the declarative channel-config view of one upstream
 // response (errorPaths / messagePaths / httpErrors / statusCodeMapping).
-// Host interpretUpstream consumes it; plugins only declare shape in manifest.
+// Host interpretUpstream consumes it via protocol.Interpret; plugins only
+// declare shape in manifest.
 type ResponseError struct {
 	Failed           bool
 	Pending          bool   // continue original task; only for non-2xx httpErrors

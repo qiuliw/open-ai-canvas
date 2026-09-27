@@ -1525,9 +1525,10 @@ func manifestError(payload map[string]any, paths ...string) bool {
 	return false
 }
 
-// InterpretResponse applies declarative response.* for one status+body.
+// Interpret applies declarative response.* for one status+body.
 // handled=false when adapter is not a manifest plugin.
-func InterpretResponse(adapter Adapter, statusCode int, body []byte) (ResponseError, bool) {
+// Host wraps this inside interpretUpstream; call sites should use the host entry.
+func Interpret(adapter Adapter, statusCode int, body []byte) (ResponseError, bool) {
 	for adapter != nil {
 		switch typed := adapter.(type) {
 		case metadataAdapter:

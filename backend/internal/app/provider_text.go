@@ -1119,7 +1119,7 @@ func validateTextPayload(payload map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	if failed, failure := interpretUpstream(nil, "", http.StatusOK, body); failed {
+	if failed, failure := interpretUpstream(nil, http.StatusOK, body); failed {
 		return failure
 	}
 	return nil

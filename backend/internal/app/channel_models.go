@@ -838,7 +838,7 @@ func imageTestDefaults(profile *ImageCapabilityConfig) (string, string) {
 }
 
 func normalizeChannelModelContract(channel *model.ModelChannel, req ChannelModelRequest) (string, string, string, model.ChannelInterfaceType, error) {
-	return normalizeChannelModelContractWithRegistry(protocol.Builtins(), channel, req)
+	return normalizeChannelModelContractWithRegistry(loadOfficialFallbackRegistry(), channel, req)
 }
 
 func (s *Service) normalizeChannelModelContract(channel *model.ModelChannel, req ChannelModelRequest) (string, string, string, model.ChannelInterfaceType, error) {

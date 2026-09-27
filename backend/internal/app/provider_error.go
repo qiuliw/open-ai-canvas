@@ -14,25 +14,39 @@ const contentModerationErrorCode = "sensitive_words_detected"
 
 const contentModerationRetryMessage = "内容审核未通过，请修改提示词后重新生成；原任务不能直接重试"
 
+type providerFailureKind string
+
+const (
+	providerFailureHTTP     providerFailureKind = "http"
+	providerFailureBusiness providerFailureKind = "business"
+)
+
 // interpretUpstream is the only host entry for upstream response errors
 // (new-api RelayErrorHandler + ResetStatusCode in one call):
 //  1. GeneralError field extract → providerFailure
-//  2. declarative channel config (errorPaths / httpErrors / statusCodeMapping)
+//  2. declarative channel config via protocol.Interpret
 //
-// Non-2xx always failed (Pending only when plugin says so and taskID is set).
-// 2xx fails only on a business-error envelope.
-func interpretUpstream(adapter protocol.Adapter, taskID string, statusCode int, body []byte) (failed bool, failure providerFailure) {
-	failure = providerFailure{StatusCode: statusCode, Body: string(body)}
+// Non-2xx always failed. Plugin may mark ChannelPending; attachUpstreamTaskID
+// turns that into Pending once a Provider Task ID is known.
+// 2xx fails only on a business-error envelope (Kind=business, StatusCode kept).
+// Adapter must already be bound on the outbound context (withProviderChannel);
+// this function never looks up channels itself.
+func interpretUpstream(adapter protocol.Adapter, statusCode int, body []byte) (failed bool, failure providerFailure) {
+	failure = providerFailure{
+		Kind:       providerFailureHTTP,
+		StatusCode: statusCode,
+		Body:       string(body),
+	}
 	fillGeneralErrorFields(&failure)
 
 	if statusCode < 200 || statusCode >= 300 {
-		if channel, ok := protocol.InterpretResponse(adapter, statusCode, body); ok {
-			applyChannelResponse(taskID, channel, &failure)
+		if channel, ok := protocol.Interpret(adapter, statusCode, body); ok {
+			applyChannelResponse(channel, &failure)
 		}
 		return true, failure
 	}
 
-	if channel, ok := protocol.InterpretResponse(adapter, statusCode, body); ok {
+	if channel, ok := protocol.Interpret(adapter, statusCode, body); ok {
 		if !channel.Failed {
 			return false, failure
 		}
@@ -42,8 +56,7 @@ func interpretUpstream(adapter protocol.Adapter, taskID string, statusCode int, 
 		if channel.Message != "" {
 			failure.Message = channel.Message
 		}
-		// 2xx business envelope is not an HTTP-class failure (avoids "HTTP 200" / upstream_200).
-		failure.StatusCode = 0
+		failure.Kind = providerFailureBusiness
 		return true, failure
 	}
 
@@ -58,25 +71,25 @@ func interpretUpstream(adapter protocol.Adapter, taskID string, statusCode int, 
 		if message != "" {
 			failure.Message = message
 		}
-		failure.StatusCode = 0
+		failure.Kind = providerFailureBusiness
 		return true, failure
 	}
 	return false, failure
 }
 
-// interpretUpstreamErr re-interprets an HTTP-layer providerFailure with channel
-// config (taskID enables Pending → continue original poll).
-func interpretUpstreamErr(adapter protocol.Adapter, taskID string, err error) error {
+// attachUpstreamTaskID enables Pending continuation without re-interpreting the body.
+func attachUpstreamTaskID(err error, taskID string) error {
 	var failure providerFailure
 	if !errors.As(err, &failure) {
 		return err
 	}
-	retryAfter := failure.RetryAfter
-	status := failure.Status
-	_, out := interpretUpstream(adapter, taskID, failure.StatusCode, []byte(failure.Body))
-	out.RetryAfter = retryAfter
-	out.Status = status
-	return out
+	taskID = strings.TrimSpace(taskID)
+	if !failure.ChannelPending || taskID == "" {
+		return failure
+	}
+	failure.Pending = true
+	failure.TaskID = taskID
+	return failure
 }
 
 func analyticsFromContext(ctx context.Context) providerAnalyticsContext {
@@ -84,7 +97,7 @@ func analyticsFromContext(ctx context.Context) providerAnalyticsContext {
 	return metadata
 }
 
-func applyChannelResponse(taskID string, channel protocol.ResponseError, failure *providerFailure) {
+func applyChannelResponse(channel protocol.ResponseError, failure *providerFailure) {
 	if failure == nil {
 		return
 	}
@@ -95,11 +108,7 @@ func applyChannelResponse(taskID string, channel protocol.ResponseError, failure
 		failure.Message = strings.TrimSpace(channel.Message)
 	}
 	if channel.Pending {
-		if strings.TrimSpace(taskID) == "" {
-			return
-		}
-		failure.Pending = true
-		failure.TaskID = taskID
+		failure.ChannelPending = true
 		return
 	}
 	if channel.MappedStatusCode > 0 {
@@ -236,5 +245,7 @@ func normalizedProviderErrorCode(value any) string {
 }
 
 func isContentModerationFailure(value string) bool {
-	return strings.Contains(strings.ToLower(value), contentModerationErrorCode)
+	normalized := strings.ToLower(value)
+	return strings.Contains(normalized, contentModerationErrorCode) ||
+		strings.Contains(normalized, "inputtextsensitivecontentdetected")
 }

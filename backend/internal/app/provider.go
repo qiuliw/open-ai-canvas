@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
+	"infinite-canvas/backend/internal/protocol"
 	"io"
 	"net/http"
 	"regexp"
@@ -133,15 +134,18 @@ type providerError struct {
 
 // providerFailure 是上游失败的唯一类型：重试、调用日志、用户文案都只消费它。
 // Pending 表示任务尚未就绪（继续查询原任务），不是终态失败。
+// ChannelPending 表示插件已声明「暂态」，等 attachUpstreamTaskID 挂上 TaskID 后才变 Pending。
 type providerFailure struct {
-	StatusCode int
-	Status     string
-	Body       string
-	Code       string
-	Message    string
-	Pending    bool
-	TaskID     string
-	RetryAfter time.Duration
+	Kind           providerFailureKind
+	StatusCode     int
+	Status         string
+	Body           string
+	Code           string
+	Message        string
+	ChannelPending bool
+	Pending        bool
+	TaskID         string
+	RetryAfter     time.Duration
 }
 
 type providerResponseDecodeError struct {
@@ -177,6 +181,9 @@ type providerAnalyticsContext struct {
 	RequestKind       string
 	ProviderRequestID string
 	ConcurrencyLimit  int
+	// Adapter is the channel protocol bound for this outbound request. interpretUpstream
+	// must use it; do not re-resolve later on a different path.
+	Adapter protocol.Adapter
 }
 
 func withProviderAnalytics(ctx context.Context, service *Service, task model.Task) context.Context {
@@ -221,6 +228,40 @@ func withProviderRequestKind(ctx context.Context, requestKind string) context.Co
 	return context.WithValue(ctx, providerAnalyticsKey{}, metadata)
 }
 
+// withProviderChannel binds channel identity and protocol adapter onto the outbound
+// context so doBinary's interpretUpstream uses the same channel as the caller.
+func withProviderChannel(ctx context.Context, config providerConfig, adapter protocol.Adapter) context.Context {
+	metadata, _ := ctx.Value(providerAnalyticsKey{}).(providerAnalyticsContext)
+	if id := strings.TrimSpace(config.ChannelID); id != "" {
+		metadata.ChannelID = id
+	}
+	if id := strings.TrimSpace(config.InterfaceType); id != "" {
+		metadata.InterfaceType = id
+	}
+	if adapter != nil {
+		metadata.Adapter = adapter
+		if metadata.InterfaceType == "" {
+			metadata.InterfaceType = strings.TrimSpace(adapter.Metadata().ID)
+		}
+	}
+	return context.WithValue(ctx, providerAnalyticsKey{}, metadata)
+}
+
+// ensureProviderChannelContext fills Adapter from InterfaceType when the caller
+// only set the wire id (legacy/non-declarative paths still share doBinary).
+func ensureProviderChannelContext(ctx context.Context, config providerConfig) context.Context {
+	ctx = withProviderChannel(ctx, config, nil)
+	metadata, _ := ctx.Value(providerAnalyticsKey{}).(providerAnalyticsContext)
+	if metadata.Adapter != nil {
+		return ctx
+	}
+	if metadata.InterfaceType == "" {
+		return ctx
+	}
+	metadata.Adapter = resolveProtocolAdapter(ctx, metadata)
+	return context.WithValue(ctx, providerAnalyticsKey{}, metadata)
+}
+
 func (e providerFailure) Error() string {
 	if e.Pending {
 		return fmt.Sprintf("上游任务状态尚未同步，将继续查询原任务（任务 %s）", e.TaskID)
@@ -229,18 +270,19 @@ func (e providerFailure) Error() string {
 	if body == "" && e.Message != "" {
 		body = e.Message
 	}
-	if e.StatusCode == http.StatusBadRequest || e.StatusCode == http.StatusUnprocessableEntity || e.StatusCode == 0 {
+	if e.Kind == providerFailureBusiness || e.StatusCode == http.StatusBadRequest || e.StatusCode == http.StatusUnprocessableEntity {
 		return providerErrorWithDetail(e.summary(), body)
 	}
 	return appendProviderErrorDetail(e.summary(), body)
 }
 
 func (e providerFailure) summary() string {
+	if e.Kind == providerFailureBusiness {
+		return "模型服务返回失败，请检查请求内容或渠道配置"
+	}
 	switch e.StatusCode {
 	case 524:
 		return "上游网关超时（524）：模型请求可能仍在服务端执行并产生费用，请勿立即重试，请先到供应商后台核对任务或账单"
-	case 0:
-		return "模型服务返回失败，请检查请求内容或渠道配置"
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
 		return "模型服务拒绝了请求，请检查模型和参数"
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -254,6 +296,9 @@ func (e providerFailure) summary() string {
 	}
 	if e.StatusCode >= http.StatusInternalServerError {
 		return fmt.Sprintf("模型服务暂时不可用（HTTP %d）", e.StatusCode)
+	}
+	if e.StatusCode == 0 {
+		return "模型服务返回失败，请检查请求内容或渠道配置"
 	}
 	return fmt.Sprintf("模型服务请求失败（HTTP %d）", e.StatusCode)
 }
@@ -293,9 +338,15 @@ func providerFailureCategory(raw string) (string, bool) {
 	// 正文常常回显用户提示词，"likeness"、"肖像"这类词单独出现并不能证明
 	// 上游是因为真人形象拒绝，按词判断会把普通参数错误误报成肖像问题。
 	// 该类目排在安全审核之前：错误码已经足够具体，比通用审核提示更可行动。
-	case strings.Contains(normalized, "privacyinformation"), strings.Contains(normalized, "sensitivecontentdetected"):
+	case strings.Contains(normalized, "privacyinformation"):
 		return "输入素材疑似包含真人形象，该模型拒绝生成，请更换为非真人素材或改用其他模型", true
-	case strings.Contains(normalized, "safety"), strings.Contains(normalized, "moderation"), strings.Contains(normalized, "content policy"), strings.Contains(normalized, "blocked"):
+	case strings.Contains(normalized, "inputtextsensitivecontentdetected"),
+		strings.Contains(normalized, contentModerationErrorCode),
+		strings.Contains(normalized, "sensitivecontentdetected"),
+		strings.Contains(normalized, "safety"),
+		strings.Contains(normalized, "moderation"),
+		strings.Contains(normalized, "content policy"),
+		strings.Contains(normalized, "blocked"):
 		return "请求内容未通过模型服务安全审核，请调整后重试", true
 	// 工具调用与工具结果不配对：上游要求 assistant 消息声明的每一个 tool_call_id 都在
 	// 紧随其后的 tool 消息里被回应。这是**我们组装请求**的问题——用户改提示词或查额度
@@ -485,43 +536,17 @@ type providerMediaHydrationPolicy struct {
 }
 
 func providerMediaHydrationPolicyFor(ctx context.Context, input canvasGenerationInput) providerMediaHydrationPolicy {
-	policy := providerMediaHydrationPolicy{preferURL: providerPrefersMediaURLs(input.Config.InterfaceType, input)}
-	switch strings.TrimSpace(input.Config.InterfaceType) {
-	case string(model.ChannelInterfaceNewAPIVideo), string(model.ChannelInterfaceNewAPIChannel1), string(model.ChannelInterfaceNewAPIChannel2), string(model.ChannelInterfaceVolcengineArkVideo), string(model.ChannelInterfaceVolcengineArkAgentPlanVideo), string(model.ChannelInterfaceMiniMaxVideo):
-		policy.requireURL = true
-		policy.preferURL = true
+	policy := providerMediaHydrationPolicy{}
+	if input.Mask != nil {
+		// OpenAI 图片编辑等 multipart 请求需要真实文件字节，遮罩场景不能改发 URL。
+		return policy
 	}
+	ctx = ensureOfficialProtocolAdapter(ctx, input.Config.InterfaceType)
 	if adapter, ok := protocolAdapterForContext(ctx, input.Config.InterfaceType); ok && adapter.Metadata().RequiresPublicMediaURLs {
 		policy.requireURL = true
 		policy.preferURL = true
 	}
-	if input.Mask != nil {
-		policy.requireURL = false
-		policy.preferURL = false
-	}
 	return policy
-}
-
-// providerPrefersMediaURLs 只列出明确接受远程 URL 的协议。
-// 需要 multipart/原始字节的协议继续走字节路径，不能为了减少下载而擅自改变请求合同。
-func providerPrefersMediaURLs(interfaceType string, input canvasGenerationInput) bool {
-	if input.Mask != nil {
-		// OpenAI 图片编辑等 multipart 请求需要真实文件字节，遮罩场景不能改发 URL。
-		return false
-	}
-	switch strings.TrimSpace(interfaceType) {
-	case string(model.ChannelInterfaceChatCompletion), string(model.ChannelInterfaceOpenAIResponse), string(model.ChannelInterfaceClaudeAPI),
-		string(model.ChannelInterfaceGrokImage), string(model.ChannelInterfaceVolcengineArkImage), string(model.ChannelInterfaceVolcengineArkAgentPlanImage),
-		string(model.ChannelInterfaceXAIVideo), string(model.ChannelInterfaceNovitaVideo),
-		string(model.ChannelInterfaceMiniMaxVideo), string(model.ChannelInterfaceNewAPIVideo),
-		string(model.ChannelInterfaceNewAPIChannel1), string(model.ChannelInterfaceNewAPIChannel2),
-		string(model.ChannelInterfaceVolcengineArkVideo), string(model.ChannelInterfaceVolcengineArkAgentPlanVideo):
-		return true
-	}
-	if isGrokVideoConfig(input.Config) || isSeedanceVideoConfig(input.Config) || isArkPlanVideoConfig(input.Config) {
-		return true
-	}
-	return false
 }
 
 type styleExecutionPlanDocument struct {

@@ -18,7 +18,7 @@ description: Channel 2 视频任务创建、轮询与上游任务同步延迟处
 
 ## 上游同步延迟
 
-创建接口返回任务 ID 后，Channel 2 可能在数百毫秒到数秒内仍对查询接口返回结构化的 `400`：
+创建接口返回任务 ID 后，上游可能在数百毫秒到数秒内仍对查询接口返回结构化的 `400`：
 
 ```json
 {"code":"task_not_exist","message":"task_not_exist"}
@@ -32,8 +32,10 @@ description: Channel 2 视频任务创建、轮询与上游任务同步延迟处
 
 新任务和恢复任务都在首次查询前等待 30 秒，后续统一每 30 秒查询。连续三次「任务尚未就绪」或 HTTP 404 才结束；中间任何一次正常的 pending/running 响应都会清零连续计数。HTTP 408/409/425/429/5xx、临时网络错误、断流、渠道槽位和短时熔断继续查询原 Provider Task ID，不发送第二次创建请求。
 
+前台执行窗口到期、或上述 `pending` 同步延迟（自任务开始起最多 5 分钟）时，只要本地已持久化 `ProviderRequestID`，宿主会延期任务并继续 poll-only 回查原上游 ID。该延期策略与协议 ID 无关，不单点绑定 Channel 2。
+
 默认视频执行窗口为 60 分钟；管理员已经保存的运行时策略仍按保存值执行。视频真正返回 failed/cancelled/expired 等终态时，仍按供应商失败处理。
 
 ## 兼容边界
 
-该容错由声明式插件的 `httpErrors` 声明，宿主只执行统一的 pending / 轮询语义。缺少 Provider Task ID 的创建失败、真实参数错误、鉴权错误和非法插件映射不进入重试路径。
+该容错由声明式插件的 `httpErrors` 声明，宿主只执行统一的 pending / 轮询 / 有上游 ID 则延期语义。缺少 Provider Task ID 的创建失败、真实参数错误、鉴权错误和非法插件映射不进入重试路径。
