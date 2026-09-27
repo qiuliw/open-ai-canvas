@@ -134,6 +134,10 @@ type providerError struct {
 
 // providerFailure 是上游失败的唯一类型：重试、调用日志、用户文案都只消费它。
 // Pending 表示任务尚未就绪（继续查询原任务），不是终态失败。
+//
+// Body 在进程内保留上游原始原因，供协议兼容分支做机器判断；
+// Error() 只暴露经过过滤的错误原因。Provider 正文可能包含密钥或内部诊断，
+// 禁止原样进入用户错误和日志。Code/Message 仅存放已提取的短字段，写入调用日志前仍须截断。
 type providerFailure struct {
 	StatusCode int
 	Status     string
