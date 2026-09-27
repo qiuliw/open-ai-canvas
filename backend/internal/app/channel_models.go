@@ -36,6 +36,8 @@ type ChannelModelRequest struct {
 	Enabled                      *bool                          `json:"enabled"`
 	CapabilityConfig             *ModelCapabilityConfig         `json:"capabilityConfig"`
 	PriceTiers                   []ChannelModelPriceTierRequest `json:"priceTiers"`
+	// Prompt optionally overrides the built-in admin model-test prompt (diagnostics only).
+	Prompt string `json:"prompt"`
 }
 
 const maxAdminChannelModelBatchDeleteCount = 100
@@ -704,6 +706,9 @@ func (s *Service) TestAdminChannelModel(ctx context.Context, actor *model.User, 
 		"video": "A static gray circle on a white background.",
 		"audio": "Model test.",
 	}[capability]
+	if override := strings.TrimSpace(req.Prompt); override != "" {
+		prompt = override
+	}
 	videoSeconds := "6"
 	videoSecondsValue := 6
 	if protocol == model.ChannelInterfaceVolcengineJiMengVideo {
