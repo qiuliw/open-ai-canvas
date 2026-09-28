@@ -72,6 +72,8 @@ func OfficialDeclarativeVideoInterface(interfaceType string) (string, bool) {
 		return "xAI", true
 	case string(model.ChannelInterfaceVolcengineArkVideo), string(model.ChannelInterfaceVolcengineArkAgentPlanVideo):
 		return "火山方舟", true
+	case string(model.ChannelInterfaceNeolinkSeedance):
+		return "NeoLink Seedance", true
 	case string(model.ChannelInterfaceVolcengineJiMengVideo):
 		return "即梦", true
 	case string(model.ChannelInterfaceNewAPIVideo):

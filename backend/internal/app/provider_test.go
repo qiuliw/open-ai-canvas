@@ -122,6 +122,10 @@ func TestChannelAPIURLNormalizesConfiguredVersionPrefix(t *testing.T) {
 		{name: "ark v3 responses", base: "https://ark.example.com/api/v3", path: "/responses", want: "https://ark.example.com/api/v3/responses"},
 		{name: "path carries ark v3", base: "https://ark.example.com", path: "/api/v3/images/generations", want: "https://ark.example.com/api/v3/images/generations"},
 		{name: "path carries autodl api v1", base: "https://autodl.art", path: "/api/v1/comfyui/comfyui_workflow/workflow-1", want: "https://autodl.art/api/v1/comfyui/comfyui_workflow/workflow-1"},
+		{name: "neolink seedance contents", base: "https://neolink.com/api", path: "/contents/generations/tasks", want: "https://neolink.com/api/v1/contents/generations/tasks"},
+		{name: "neolink seedance poll", base: "https://neolink.com/api", path: "/contents/generations/tasks/task-1", want: "https://neolink.com/api/v1/contents/generations/tasks/task-1"},
+		{name: "neolink avoids api/v3 double prefix", base: "https://neolink.com/api", path: "/api/v3/contents/generations/tasks", want: "https://neolink.com/api/api/v3/contents/generations/tasks"},
+		{name: "official ark seedance with version on base", base: "https://ark.cn-beijing.volces.com/api/v3", path: "/contents/generations/tasks", want: "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

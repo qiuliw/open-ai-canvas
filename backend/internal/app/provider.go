@@ -492,7 +492,7 @@ type providerMediaHydrationPolicy struct {
 func providerMediaHydrationPolicyFor(ctx context.Context, input canvasGenerationInput) providerMediaHydrationPolicy {
 	policy := providerMediaHydrationPolicy{preferURL: providerPrefersMediaURLs(input.Config.InterfaceType, input)}
 	switch strings.TrimSpace(input.Config.InterfaceType) {
-	case string(model.ChannelInterfaceNewAPIVideo), string(model.ChannelInterfaceNewAPIChannel1), string(model.ChannelInterfaceNewAPIChannel2), string(model.ChannelInterfaceVolcengineArkVideo), string(model.ChannelInterfaceVolcengineArkAgentPlanVideo), string(model.ChannelInterfaceMiniMaxVideo):
+	case string(model.ChannelInterfaceNewAPIVideo), string(model.ChannelInterfaceNewAPIChannel1), string(model.ChannelInterfaceNewAPIChannel2), string(model.ChannelInterfaceVolcengineArkVideo), string(model.ChannelInterfaceVolcengineArkAgentPlanVideo), string(model.ChannelInterfaceNeolinkSeedance), string(model.ChannelInterfaceMiniMaxVideo):
 		policy.requireURL = true
 		policy.preferURL = true
 	}
@@ -520,7 +520,8 @@ func providerPrefersMediaURLs(interfaceType string, input canvasGenerationInput)
 		string(model.ChannelInterfaceXAIVideo), string(model.ChannelInterfaceNovitaVideo),
 		string(model.ChannelInterfaceMiniMaxVideo), string(model.ChannelInterfaceNewAPIVideo),
 		string(model.ChannelInterfaceNewAPIChannel1), string(model.ChannelInterfaceNewAPIChannel2),
-		string(model.ChannelInterfaceVolcengineArkVideo), string(model.ChannelInterfaceVolcengineArkAgentPlanVideo):
+		string(model.ChannelInterfaceVolcengineArkVideo), string(model.ChannelInterfaceVolcengineArkAgentPlanVideo),
+		string(model.ChannelInterfaceNeolinkSeedance):
 		return true
 	}
 	if isGrokVideoConfig(input.Config) || isSeedanceVideoConfig(input.Config) || isArkPlanVideoConfig(input.Config) {

@@ -473,8 +473,19 @@ add({
   id: "volcengine-ark-seedance", providerId: "volcengine-ark-video", name: "Volcengine Ark Seedance", vendor: "Volcengine", capability: "video",
   baseUrl: "https://ark.cn-beijing.volces.com", auth: bearer, params: arkSeedanceParams, requiresPublicMediaUrls: true,
   validations: arkSeedanceValidations,
-  notes: "官方 Ark 推理接入：创建/查询/取消走 /api/v3/contents/generations/tasks；插件不根据图片下标推断首尾帧，role 由业务层确定。API Key 来自方舟推理接入控制台。",
+  notes: "官方 Ark 推理接入：创建/查询/取消 path 为 /contents/generations/tasks，版本段放在渠道 Base URL（如 …/api/v3）。插件不根据图片下标推断首尾帧，role 由业务层确定。API Key 来自方舟推理接入控制台。",
   create: jsonCreate("/contents/generations/tasks", arkSeedanceBody("volcengine-ark-video")),
+  poll: { method: "GET", path: "/contents/generations/tasks/{{taskId}}" },
+  cancel: { method: "DELETE", path: "/contents/generations/tasks/{{taskId}}" },
+  response: arkSeedanceResponse
+});
+
+add({
+  id: "neolink-seedance", providerId: "neolink-seedance", name: "NeoLink Seedance", vendor: "NeoLink", capability: "video",
+  baseUrl: "https://neolink.com/api", auth: bearer, params: arkSeedanceParams, requiresPublicMediaUrls: true,
+  validations: arkSeedanceValidations,
+  notes: "NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但默认 Base 为 https://neolink.com/api，path 为 /contents/generations/tasks（不写死 /api/v3）。宿主会默认再拼 /v1，实际上游为 /api/v1/contents/...。勿与官方 volcengine-ark-seedance 混用同一渠道配置。",
+  create: jsonCreate("/contents/generations/tasks", arkSeedanceBody("neolink-seedance")),
   poll: { method: "GET", path: "/contents/generations/tasks/{{taskId}}" },
   cancel: { method: "DELETE", path: "/contents/generations/tasks/{{taskId}}" },
   response: arkSeedanceResponse

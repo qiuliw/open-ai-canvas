@@ -184,7 +184,7 @@ function resolveModelAdaptationProfile(input: PromptOptimizationInput): ModelAda
         return genericImageProfile;
     }
 
-    if (containsAny(model, ["seedance", "doubao-seedance", "volcengine-ark-video", "volcengine-ark-agent-plan-video", "volcengine-jimeng-video", "jimeng-video"])) {
+    if (containsAny(model, ["seedance", "doubao-seedance", "neolink-seedance", "volcengine-ark-video", "volcengine-ark-agent-plan-video", "volcengine-jimeng-video", "jimeng-video"])) {
         return {
             id: "seedance-video",
             label: "Seedance / 即梦视频模型",
