@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -46,5 +47,47 @@ func TestNeolinkSeedanceCreatePollAndCancelPaths(t *testing.T) {
 	}
 	if cancel.Method != "DELETE" || cancel.Path != "/contents/generations/tasks/task-1" {
 		t.Fatalf("cancel = %#v", cancel)
+	}
+}
+
+func TestNeolinkSeedanceMapsSensitiveErrorCodesToChinese(t *testing.T) {
+	adapter := officialPackageAdapter(t, "neolink-seedance.yingce-plugin", "neolink-seedance")
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "text sensitive",
+			body: `{"id":"task-1","status":"failed","error":{"code":"InputTextSensitiveContentDetected","message":"The request failed because the input text may contain sensitive information. Request id: secret"}}`,
+			want: "提示词未通过内容安全审核，请修改后重试",
+		},
+		{
+			name: "real person image",
+			body: `{"id":"task-1","status":"failed","error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"may contain real person. Request id: secret"}}`,
+			want: "输入图片疑似包含真人形象，请更换素材或改用其他模型",
+		},
+		{
+			name: "unknown code keeps upstream message",
+			body: `{"id":"task-1","status":"failed","error":{"code":"SomeOtherCode","message":"自定义上游失败原因"}}`,
+			want: "自定义上游失败原因",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: "task-1"}, []byte(tt.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != StatusFailed {
+				t.Fatalf("status = %q, want failed", result.Status)
+			}
+			if result.Message != tt.want {
+				t.Fatalf("message = %q, want %q", result.Message, tt.want)
+			}
+			if strings.Contains(result.Message, "Request id") || strings.Contains(result.Message, "secret") {
+				t.Fatalf("message leaked diagnostics: %q", result.Message)
+			}
+		})
 	}
 }

@@ -72,10 +72,13 @@
 | --- | --- |
 | `response.taskId` | `{"$coalesce":[{"$ref":"response.id"},{"$ref":"response.task_id"},{"$ref":"response.data.id"},{"$ref":"taskId"}]}` |
 | `response.status` | `{"$coalesce":[{"$ref":"response.status"},{"$ref":"response.data.status"},"pending"]}` |
-| `response.message` | `{"$coalesce":[{"$ref":"response.error.message"},{"$ref":"response.message"},{"$ref":"response.fail_reason"}]}` |
+| `response.message` | `{"$switch":{"cases":[{"when":{"$in":[{"$ref":"response.error.code"},["InputTextSensitiveContentDetected","OutputTextSensitiveContentDetected"]]},"then":"提示词未通过内容安全审核，请修改后重试"},{"when":{"$eq":[{"$ref":"response.error.code"},"InputImageSensitiveContentDetected.PrivacyInformation"]},"then":"输入图片疑似包含真人形象，请更换素材或改用其他模型"},{"when":{"$in":[{"$ref":"response.error.code"},["InputImageSensitiveContentDetected","OutputImageSensitiveContentDetected","InputVideoSensitiveContentDetected","OutputVideoSensitiveContentDetected","SensitiveContentDetected"]]},"then":"内容未通过安全审核，请调整素材或提示词后重试"}],"default":{"$coalesce":[{"$ref":"response.error.message"},{"$ref":"response.message"},{"$ref":"response.fail_reason"}]}}}` |
 | `response.videos` | `{"$coalesce":[{"$ref":"response.content.video_url"},{"$ref":"response.video_url"},{"$ref":"response.output.video_url"},{"$ref":"response.data.video_url"}]}` |
 | `response.usage` | `{"$ref":"response.usage"}` |
 | `response.errorPaths[0]` | `"error.code"` |
+| `response.messagePaths[0]` | `"error.message"` |
+| `response.messagePaths[1]` | `"message"` |
+| `response.messagePaths[2]` | `"fail_reason"` |
 | `response.resultEphemeral` | `true` |
 
 ## 响应与错误
@@ -483,17 +486,65 @@ NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但�
             ]
           },
           "message": {
-            "$coalesce": [
-              {
-                "$ref": "response.error.message"
-              },
-              {
-                "$ref": "response.message"
-              },
-              {
-                "$ref": "response.fail_reason"
+            "$switch": {
+              "cases": [
+                {
+                  "when": {
+                    "$in": [
+                      {
+                        "$ref": "response.error.code"
+                      },
+                      [
+                        "InputTextSensitiveContentDetected",
+                        "OutputTextSensitiveContentDetected"
+                      ]
+                    ]
+                  },
+                  "then": "提示词未通过内容安全审核，请修改后重试"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$ref": "response.error.code"
+                      },
+                      "InputImageSensitiveContentDetected.PrivacyInformation"
+                    ]
+                  },
+                  "then": "输入图片疑似包含真人形象，请更换素材或改用其他模型"
+                },
+                {
+                  "when": {
+                    "$in": [
+                      {
+                        "$ref": "response.error.code"
+                      },
+                      [
+                        "InputImageSensitiveContentDetected",
+                        "OutputImageSensitiveContentDetected",
+                        "InputVideoSensitiveContentDetected",
+                        "OutputVideoSensitiveContentDetected",
+                        "SensitiveContentDetected"
+                      ]
+                    ]
+                  },
+                  "then": "内容未通过安全审核，请调整素材或提示词后重试"
+                }
+              ],
+              "default": {
+                "$coalesce": [
+                  {
+                    "$ref": "response.error.message"
+                  },
+                  {
+                    "$ref": "response.message"
+                  },
+                  {
+                    "$ref": "response.fail_reason"
+                  }
+                ]
               }
-            ]
+            }
           },
           "videos": {
             "$coalesce": [
@@ -516,6 +567,11 @@ NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但�
           },
           "errorPaths": [
             "error.code"
+          ],
+          "messagePaths": [
+            "error.message",
+            "message",
+            "fail_reason"
           ],
           "resultEphemeral": true
         }

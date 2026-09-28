@@ -459,13 +459,44 @@ const arkSeedanceBody = (optionNamespace) => ({
   camera_fixed: omit(ref(`request.providerOptions.${optionNamespace}.camera_fixed`))
 });
 
+// Seedance/Ark 敏感错误码由插件映射为可读中文；宿主不做厂商码归类。
+const arkSeedanceErrorMessage = {
+  $switch: {
+    cases: [
+      {
+        when: { $in: [ref("response.error.code"), [
+          "InputTextSensitiveContentDetected",
+          "OutputTextSensitiveContentDetected"
+        ]] },
+        then: "提示词未通过内容安全审核，请修改后重试"
+      },
+      {
+        when: eq(ref("response.error.code"), "InputImageSensitiveContentDetected.PrivacyInformation"),
+        then: "输入图片疑似包含真人形象，请更换素材或改用其他模型"
+      },
+      {
+        when: { $in: [ref("response.error.code"), [
+          "InputImageSensitiveContentDetected",
+          "OutputImageSensitiveContentDetected",
+          "InputVideoSensitiveContentDetected",
+          "OutputVideoSensitiveContentDetected",
+          "SensitiveContentDetected"
+        ]] },
+        then: "内容未通过安全审核，请调整素材或提示词后重试"
+      }
+    ],
+    default: coalesce(ref("response.error.message"), ref("response.message"), ref("response.fail_reason"))
+  }
+};
+
 const arkSeedanceResponse = {
   taskId: coalesce(ref("response.id"), ref("response.task_id"), ref("response.data.id"), ref("taskId")),
   status: coalesce(ref("response.status"), ref("response.data.status"), "pending"),
-  message: coalesce(ref("response.error.message"), ref("response.message"), ref("response.fail_reason")),
+  message: arkSeedanceErrorMessage,
   videos: coalesce(ref("response.content.video_url"), ref("response.video_url"), ref("response.output.video_url"), ref("response.data.video_url")),
   usage: ref("response.usage"),
   errorPaths: ["error.code"],
+  messagePaths: ["error.message", "message", "fail_reason"],
   resultEphemeral: true
 };
 
