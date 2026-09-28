@@ -284,58 +284,6 @@ func providerUserFacingErrorMessage(err error) string {
 	return "连接模型服务失败，请检查渠道地址和网络"
 }
 
-// providerPayloadErrorCategory 把上游失败正文归类为固定的用户可见原因。
-// 第二个返回值为 false 表示正文无法归类，调用方应退回到更通用的提示，
-// 不要因为归类失败就把正文本身当作错误信息。
-// 正文可能包含密钥或内部诊断信息，只能参与归类，不得回传用户或写入日志。
-func providerPayloadErrorCategory(raw string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(raw))
-	if normalized == "" {
-		return "", false
-	}
-	switch {
-	// 真人肖像类目只匹配供应商错误码里的稳定标识，不扫描自然语言。
-	// 正文常常回显用户提示词，"likeness"、"肖像"这类词单独出现并不能证明
-	// 上游是因为真人形象拒绝，按词判断会把普通参数错误误报成肖像问题。
-	// 该类目排在安全审核之前：错误码已经足够具体，比通用审核提示更可行动。
-	case strings.Contains(normalized, "privacyinformation"), strings.Contains(normalized, "sensitivecontentdetected"):
-		return "输入素材疑似包含真人形象，该模型拒绝生成，请更换为非真人素材或改用其他模型", true
-	case strings.Contains(normalized, "safety"), strings.Contains(normalized, "moderation"), strings.Contains(normalized, "content policy"), strings.Contains(normalized, "blocked"):
-		return "请求内容未通过模型服务安全审核，请调整后重试", true
-	// 工具调用与工具结果不配对：上游要求 assistant 消息声明的每一个 tool_call_id 都在
-	// 紧随其后的 tool 消息里被回应。这是**我们组装请求**的问题——用户改提示词或查额度
-	// 都没用——所以文案指向反馈而不是"调整输入"。
-	//
-	// 必须排在额度类目之前：DeepSeek 的原文含 "insufficient"，
-	// "An assistant message with 'tool_calls' must be followed by tool messages
-	// responding to each 'tool_call_id'. (insufficient tool messages following
-	// tool_calls message)" 落到额度类目就会把协议错误报成"渠道余额不足"，
-	// 掩盖真正的原因（历史里的工具结果不连续）。
-	case strings.Contains(normalized, "must be followed by tool messages"),
-		strings.Contains(normalized, "insufficient tool messages following"):
-		return "会话里的工具调用与结果不匹配，本轮已停止；这不是额度或提示词问题，如反复出现请反馈", true
-	case strings.Contains(normalized, "quota"), strings.Contains(normalized, "insufficient"), strings.Contains(normalized, "balance"), strings.Contains(normalized, "billing"):
-		return "模型服务额度不足，请检查渠道余额或配额", true
-	case strings.Contains(normalized, "model") && (strings.Contains(normalized, "not found") || strings.Contains(normalized, "permission") || strings.Contains(normalized, "access")):
-		return "模型不存在或当前渠道未获得模型权限", true
-	// 推理/思考模式模型通常禁止强制指定工具调用：DeepSeek 思考模式返回
-	// "Thinking mode does not support this tool_choice"，其他 OpenAI 兼容
-	// 供应商措辞类似。归为固定可行动原因；显式思考模式会在出站前省略
-	// tool_choice，未声明但由上游隐式开启思考时再按兼容序列重试。排在
-	// 通用参数类目之前，避免稳定标识落回笼统的"请检查模型和参数"。
-	case (strings.Contains(normalized, "thinking") || strings.Contains(normalized, "reasoning")) && strings.Contains(normalized, "tool_choice"),
-		strings.Contains(normalized, "tool_choice") && (strings.Contains(normalized, "not support") || strings.Contains(normalized, "unsupported")):
-		return "当前模型为思考/推理模式，不支持强制工具调用（tool_choice=required），请改用自动工具选择或更换非思考模式模型", true
-	case strings.Contains(normalized, "invalid"), strings.Contains(normalized, "parameter"), strings.Contains(normalized, "argument"):
-		return "模型服务拒绝了请求，请检查模型和参数", true
-	}
-	return "", false
-}
-
-func providerPayloadErrorMessage(raw string) string {
-	return providerErrorWithDetail("模型服务返回失败，请检查请求内容或渠道配置", raw)
-}
-
 func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string, taskProjectID string, taskType string, fallbackPrompt string, rawInput string) (map[string]interface{}, error) {
 	ctx = withProtocolRegistry(ctx, s.protocolRegistry())
 	var input canvasGenerationInput

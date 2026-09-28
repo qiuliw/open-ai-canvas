@@ -74,7 +74,7 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 		if err != nil {
 			return nil, err
 		}
-		body, streamedResult, err := executeProtocolCreateRequest(withProviderRequestKind(ctx, "create"), input, spec)
+		body, streamedResult, err := executeChannelCreate(ctx, input, adapter, spec)
 		if err != nil {
 			return nil, err
 		}
@@ -106,15 +106,16 @@ func runProtocolAdapterTaskWithPolicy(ctx context.Context, input canvasGeneratio
 	}
 
 	return runVideoPollLoop(ctx, taskID, policy, func(ctx context.Context) (videoPollOutcome, error) {
-		spec, err := adapter.BuildPoll(ctx, protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID})
+		pollContext := protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}
+		spec, err := adapter.BuildPoll(ctx, pollContext)
 		if err != nil {
 			return videoPollOutcome{}, err
 		}
-		body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
+		body, err := executeChannelPoll(ctx, input.Config, adapter, pollContext, spec)
 		if err != nil {
 			return videoPollOutcome{}, err
 		}
-		state, err := adapter.ParsePoll(ctx, protocol.PollContext{BaseURL: input.Config.BaseURL, Model: request.Model, Request: request, TaskID: taskID}, body)
+		state, err := adapter.ParsePoll(ctx, pollContext, body)
 		if err != nil {
 			return videoPollOutcome{}, err
 		}
@@ -162,7 +163,7 @@ func queryProtocolAdapterVideoTask(ctx context.Context, input canvasGenerationIn
 	if err != nil {
 		return nil, "", err
 	}
-	body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), input.Config, spec)
+	body, err := executeChannelPoll(ctx, input.Config, adapter, pollContext, spec)
 	if err != nil {
 		return nil, "", err
 	}
@@ -322,6 +323,36 @@ func protocolMediaReference(value providerMedia, kind string, order int) protoco
 func executeProtocolRequest(ctx context.Context, config providerConfig, spec protocol.RequestSpec) ([]byte, error) {
 	data, _, err := executeProtocolBinaryRequest(ctx, config, spec)
 	return data, err
+}
+
+// executeChannelCreate / executeChannelPoll 是声明式渠道出站入口：HTTP 发出后统一做
+// 渠道 message 映射（NewAPI 式透传），调用方只处理业务 Parse 与 status。
+func executeChannelCreate(ctx context.Context, input canvasGenerationInput, adapter protocol.Adapter, spec protocol.RequestSpec) ([]byte, *protocol.Result, error) {
+	body, streamed, err := executeProtocolCreateRequest(withProviderRequestKind(ctx, "create"), input, spec)
+	if err != nil {
+		return nil, nil, protocolRelayHTTPError(err, func(raw []byte) string {
+			parsed, parseErr := adapter.ParseCreate(ctx, raw)
+			if parseErr != nil {
+				return ""
+			}
+			return parsed.Message
+		})
+	}
+	return body, streamed, nil
+}
+
+func executeChannelPoll(ctx context.Context, config providerConfig, adapter protocol.Adapter, pollContext protocol.PollContext, spec protocol.RequestSpec) ([]byte, error) {
+	body, err := executeProtocolRequest(withProviderRequestKind(ctx, "poll"), config, spec)
+	if err != nil {
+		return nil, protocolRelayHTTPError(err, func(raw []byte) string {
+			parsed, parseErr := adapter.ParsePoll(ctx, pollContext, raw)
+			if parseErr != nil {
+				return ""
+			}
+			return parsed.Message
+		})
+	}
+	return body, nil
 }
 
 // executeProtocolBinaryRequest 是声明式插件与宿主网络能力之间的边界。manifest 只能声明
@@ -947,6 +978,36 @@ func protocolResultError(message, taskID string) error {
 		return errors.New(message)
 	}
 	return fmt.Errorf("声明式协议任务失败（任务 %s）：%s", taskID, message)
+}
+
+// protocolRelayHTTPError 对齐 NewAPI：400/422 先走渠道插件 message 映射，否则透传上游 message。
+// 5xx/429/404 与 task_not_exist 仍保留 providerHTTPError，供轮询重试。
+func protocolRelayHTTPError(err error, channelMessage func([]byte) string) error {
+	var httpErr providerHTTPError
+	if !errors.As(err, &httpErr) {
+		return err
+	}
+	if httpErr.StatusCode != http.StatusBadRequest && httpErr.StatusCode != http.StatusUnprocessableEntity {
+		return err
+	}
+	if isProviderTaskNotReadyError(httpErr) {
+		return err
+	}
+	raw := strings.TrimSpace(httpErr.Body)
+	if raw == "" || (raw[0] != '{' && raw[0] != '[') || !json.Valid([]byte(raw)) {
+		return err
+	}
+	message := ""
+	if channelMessage != nil {
+		message = strings.TrimSpace(channelMessage([]byte(raw)))
+	}
+	if message == "" {
+		message = providerSafeUpstreamMessage(raw)
+	}
+	if message == "" {
+		return err
+	}
+	return errors.New(message)
 }
 
 func validateGenerationInterface(mode string, interfaceType string) error {

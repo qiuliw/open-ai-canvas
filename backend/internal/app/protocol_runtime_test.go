@@ -653,6 +653,47 @@ func TestDeclarativeMiniMaxFailureReachesTaskError(t *testing.T) {
 	}
 }
 
+func TestDeclarativeHTTPErrorJSONUsesPluginMessagePassthrough(t *testing.T) {
+	allowLoopbackProviderTest(t)
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "volcengine-ark-seedance.yingce-plugin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := protocol.ParsePluginPackage(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapters, err := protocol.LoadInstalledProviders(pkg.ManifestRaw, nil)
+	if err != nil || len(adapters) != 1 {
+		t.Fatalf("load Seedance adapter: count=%d, error=%v", len(adapters), err)
+	}
+	const body = `{"error":{"code":"InputTextSensitiveContentDetected","message":"The request failed because the input text may contain sensitive information. Request id: secret-trace"}}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/contents/generations/tasks" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	config := providerConfig{BaseURL: server.URL, APIKey: "key", Model: "doubao-seedance-2-0-mini-260615", InterfaceType: "volcengine-ark-video", VideoSeconds: "5", Size: "16:9", VQuality: "720p"}
+	_, err = runProtocolAdapterTaskWithPolicy(context.Background(), canvasGenerationInput{Mode: "video", Prompt: "test", Config: config}, adapters[0], fastVideoPollPolicy())
+	got := taskFailureMessage(err)
+	if !strings.Contains(got, "提示词未通过内容安全审核") {
+		t.Fatalf("error = %q, want plugin-mapped Chinese message", got)
+	}
+	if strings.Contains(got, "真人形象") || strings.Contains(got, "secret-trace") || strings.Contains(got, "InputTextSensitiveContentDetected") {
+		t.Fatalf("error remapped by host category or leaked diagnostics: %q", got)
+	}
+	var httpErr providerHTTPError
+	if errors.As(err, &httpErr) {
+		t.Fatalf("error stayed providerHTTPError %#v; want NewAPI-style message passthrough", httpErr)
+	}
+}
+
 func TestProviderTaskNotReadyStrictClassification(t *testing.T) {
 	tests := []struct {
 		name string

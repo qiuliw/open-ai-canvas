@@ -36,7 +36,13 @@ func TestProviderErrorDetail(t *testing.T) {
 
 func TestTaskFailurePreservesSafeProviderDetail(t *testing.T) {
 	const detail = "非常抱歉，生成的图片可能违反了关于裸露、色情或情色内容的防护限制。请重试或修改提示语。"
-	for _, status := range []int{400, 403, 422, 429, 500, 502} {
+	for _, status := range []int{400, 422} {
+		err := fmt.Errorf("图片生成失败：%w", providerHTTPError{StatusCode: status, Body: `{"error":{"message":"` + detail + `"}}`})
+		if got := taskFailureMessage(err); !strings.Contains(got, detail) || strings.Contains(got, "；上游：") {
+			t.Fatalf("status %d should passthrough message as primary text: %s", status, got)
+		}
+	}
+	for _, status := range []int{403, 429, 500, 502} {
 		err := fmt.Errorf("图片生成失败：%w", providerHTTPError{StatusCode: status, Body: `{"error":{"message":"` + detail + `"}}`})
 		if got := taskFailureMessage(err); !strings.Contains(got, "；上游："+detail) {
 			t.Fatalf("status %d lost detail: %s", status, got)
