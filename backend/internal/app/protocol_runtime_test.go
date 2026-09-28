@@ -667,30 +667,46 @@ func TestDeclarativeHTTPErrorJSONUsesPluginMessagePassthrough(t *testing.T) {
 	if err != nil || len(adapters) != 1 {
 		t.Fatalf("load Seedance adapter: count=%d, error=%v", len(adapters), err)
 	}
-	const body = `{"error":{"code":"InputTextSensitiveContentDetected","message":"The request failed because the input text may contain sensitive information. Request id: secret-trace"}}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/contents/generations/tasks" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(body))
-	}))
-	defer server.Close()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "direct ark error object",
+			body: `{"error":{"code":"InputTextSensitiveContentDetected","message":"The request failed because the input text may contain sensitive information. Request id: secret-trace"}}`,
+		},
+		{
+			name: "gateway wraps ark error json in message",
+			body: `{"code":"fail_to_fetch_task","data":null,"message":"{\"error\":{\"code\":\"InputTextSensitiveContentDetected\",\"message\":\"The request failed because the input text 'content[0]' may contain sensitive information. Request id: secret-trace\",\"type\":\"BadRequest\"}}"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/contents/generations/tasks" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
 
-	config := providerConfig{BaseURL: server.URL, APIKey: "key", Model: "doubao-seedance-2-0-mini-260615", InterfaceType: "volcengine-ark-video", VideoSeconds: "5", Size: "16:9", VQuality: "720p"}
-	_, err = runProtocolAdapterTaskWithPolicy(context.Background(), canvasGenerationInput{Mode: "video", Prompt: "test", Config: config}, adapters[0], fastVideoPollPolicy())
-	got := taskFailureMessage(err)
-	if !strings.Contains(got, "提示词未通过内容安全审核") {
-		t.Fatalf("error = %q, want plugin-mapped Chinese message", got)
-	}
-	if strings.Contains(got, "真人形象") || strings.Contains(got, "secret-trace") || strings.Contains(got, "InputTextSensitiveContentDetected") {
-		t.Fatalf("error remapped by host category or leaked diagnostics: %q", got)
-	}
-	var httpErr providerHTTPError
-	if errors.As(err, &httpErr) {
-		t.Fatalf("error stayed providerHTTPError %#v; want NewAPI-style message passthrough", httpErr)
+			config := providerConfig{BaseURL: server.URL, APIKey: "key", Model: "doubao-seedance-2-0-mini-260615", InterfaceType: "volcengine-ark-video", VideoSeconds: "5", Size: "16:9", VQuality: "720p"}
+			_, err = runProtocolAdapterTaskWithPolicy(context.Background(), canvasGenerationInput{Mode: "video", Prompt: "test", Config: config}, adapters[0], fastVideoPollPolicy())
+			got := taskFailureMessage(err)
+			if !strings.Contains(got, "提示词未通过内容安全审核") {
+				t.Fatalf("error = %q, want plugin-mapped Chinese message", got)
+			}
+			if strings.Contains(got, "真人形象") || strings.Contains(got, "secret-trace") || strings.Contains(got, "InputTextSensitiveContentDetected") || strings.Contains(got, "fail_to_fetch_task") {
+				t.Fatalf("error remapped by host category or leaked diagnostics: %q", got)
+			}
+			var httpErr providerHTTPError
+			if errors.As(err, &httpErr) {
+				t.Fatalf("error stayed providerHTTPError %#v; want NewAPI-style message passthrough", httpErr)
+			}
+		})
 	}
 }
 

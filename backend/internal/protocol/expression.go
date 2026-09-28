@@ -306,7 +306,10 @@ func evaluateManifestOperator(operator string, operand any, env map[string]any) 
 			return nil, err
 		}
 		return value, nil
-	case "$lower", "$upper", "$trim", "$toString", "$toInt", "$toFloat", "$toBool", "$dataMime", "$dataPayload", "$json":
+	case "$lower", "$upper", "$trim", "$toString", "$toInt", "$toFloat", "$toBool", "$dataMime", "$dataPayload", "$json", "$parseJSON":
+		if operator == "$parseJSON" {
+			return evaluateManifestParseJSON(operand, env)
+		}
 		value, err := evaluateManifestValue(operand, env)
 		if err != nil {
 			return nil, err
@@ -498,6 +501,41 @@ func evaluateManifestComparison(operator string, operand any, env map[string]any
 		return false, nil
 	}
 	return false, nil
+}
+
+// evaluateManifestParseJSON 把字符串解成 JSON。支持：
+// - { $parseJSON: <expr> } 整段解析
+// - { $parseJSON: { from: <expr>, path: "error.code" } } 解析后取路径
+// 非 JSON 字符串返回空，便于 $coalesce 回退，不把网关文案当硬错误。
+func evaluateManifestParseJSON(operand any, env map[string]any) (any, error) {
+	var fromTemplate any = operand
+	path := ""
+	if spec, ok := operand.(map[string]any); ok {
+		if _, hasFrom := spec["from"]; hasFrom {
+			fromTemplate = spec["from"]
+			pathValue, err := evaluateManifestValue(spec["path"], env)
+			if err != nil {
+				return nil, err
+			}
+			path = strings.TrimSpace(manifestString(pathValue))
+		}
+	}
+	value, err := evaluateManifestValue(fromTemplate, env)
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimSpace(manifestString(value))
+	if text == "" || (text[0] != '{' && text[0] != '[') || !json.Valid([]byte(text)) {
+		return nil, nil
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+		return nil, nil
+	}
+	if path == "" {
+		return parsed, nil
+	}
+	return manifestPathValue(parsed, path), nil
 }
 
 func interpolateManifestString(value string, env map[string]any) string {

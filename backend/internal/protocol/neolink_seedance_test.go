@@ -72,6 +72,11 @@ func TestNeolinkSeedanceMapsSensitiveErrorCodesToChinese(t *testing.T) {
 			body: `{"id":"task-1","status":"failed","error":{"code":"SomeOtherCode","message":"自定义上游失败原因"}}`,
 			want: "自定义上游失败原因",
 		},
+		{
+			name: "gateway wraps ark error json in message string",
+			body: `{"code":"fail_to_fetch_task","data":null,"message":"{\"error\":{\"code\":\"InputTextSensitiveContentDetected\",\"message\":\"The request failed because the input text 'content[0]' may contain sensitive information. Request id: secret\",\"type\":\"BadRequest\"}}"}`,
+			want: "提示词未通过内容安全审核，请修改后重试",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

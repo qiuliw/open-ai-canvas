@@ -7,6 +7,36 @@ import (
 	"testing"
 )
 
+func TestEvaluateManifestParseJSONPath(t *testing.T) {
+	env := map[string]any{
+		"response": map[string]any{
+			"code":    "fail_to_fetch_task",
+			"message": `{"error":{"code":"InputTextSensitiveContentDetected","message":"blocked"}}`,
+		},
+	}
+	code, err := evaluateManifestValue(map[string]any{
+		"$parseJSON": map[string]any{
+			"from": map[string]any{"$ref": "response.message"},
+			"path": "error.code",
+		},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != "InputTextSensitiveContentDetected" {
+		t.Fatalf("code = %#v", code)
+	}
+	plain, err := evaluateManifestValue(map[string]any{
+		"$parseJSON": map[string]any{"$ref": "response.code"},
+	}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain != nil {
+		t.Fatalf("non-json should be empty, got %#v", plain)
+	}
+}
+
 func TestEvaluateManifestSplitToFloatDivide(t *testing.T) {
 	env := map[string]any{"request": map[string]any{"aspectRatio": "1280x720"}}
 	parts, err := evaluateManifestValue(map[string]any{"$split": []any{map[string]any{"$ref": "request.aspectRatio"}, "x"}}, env)

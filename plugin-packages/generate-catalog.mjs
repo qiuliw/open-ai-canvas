@@ -460,22 +460,33 @@ const arkSeedanceBody = (optionNamespace) => ({
 });
 
 // Seedance/Ark 敏感错误码由插件映射为可读中文；宿主不做厂商码归类。
+// 中转站可能把方舟错误 JSON 塞进顶层 message 字符串，用 $parseJSON 读内层 code/message。
+const seedanceErrorCode = coalesce(
+  ref("response.error.code"),
+  { $parseJSON: { from: ref("response.message"), path: "error.code" } }
+);
+const seedanceErrorText = coalesce(
+  ref("response.error.message"),
+  { $parseJSON: { from: ref("response.message"), path: "error.message" } },
+  ref("response.message"),
+  ref("response.fail_reason")
+);
 const arkSeedanceErrorMessage = {
   $switch: {
     cases: [
       {
-        when: { $in: [ref("response.error.code"), [
+        when: { $in: [seedanceErrorCode, [
           "InputTextSensitiveContentDetected",
           "OutputTextSensitiveContentDetected"
         ]] },
         then: "提示词未通过内容安全审核，请修改后重试"
       },
       {
-        when: eq(ref("response.error.code"), "InputImageSensitiveContentDetected.PrivacyInformation"),
+        when: eq(seedanceErrorCode, "InputImageSensitiveContentDetected.PrivacyInformation"),
         then: "输入图片疑似包含真人形象，请更换素材或改用其他模型"
       },
       {
-        when: { $in: [ref("response.error.code"), [
+        when: { $in: [seedanceErrorCode, [
           "InputImageSensitiveContentDetected",
           "OutputImageSensitiveContentDetected",
           "InputVideoSensitiveContentDetected",
@@ -485,13 +496,18 @@ const arkSeedanceErrorMessage = {
         then: "内容未通过安全审核，请调整素材或提示词后重试"
       }
     ],
-    default: coalesce(ref("response.error.message"), ref("response.message"), ref("response.fail_reason"))
+    default: seedanceErrorText
   }
 };
 
 const arkSeedanceResponse = {
   taskId: coalesce(ref("response.id"), ref("response.task_id"), ref("response.data.id"), ref("taskId")),
-  status: coalesce(ref("response.status"), ref("response.data.status"), "pending"),
+  status: coalesce(
+    ref("response.status"),
+    ref("response.data.status"),
+    conditional(ne(coalesce(seedanceErrorCode, ""), ""), "failed"),
+    "pending"
+  ),
   message: arkSeedanceErrorMessage,
   videos: coalesce(ref("response.content.video_url"), ref("response.video_url"), ref("response.output.video_url"), ref("response.data.video_url")),
   usage: ref("response.usage"),

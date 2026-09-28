@@ -9,6 +9,7 @@ description: 当前项目已实现功能的手工验证清单与未确认边界
 
 - 已实现：从官方 Seedance 复制出独立插件 `neolink-seedance`（provider `neolink-seedance`），默认 Base `https://neolink.com/api`，create/poll/cancel path 为 `/contents/generations/tasks`（不写死 `/api/v3`）；宿主拼 URL 后为 `/api/v1/contents/...`。官方 `volcengine-ark-seedance` 保持独立，不共用配置。
 - 已实现：错误文案统一为「渠道插件 message 映射优先，否则 NewAPI 式 ToMessage 透传」；宿主不再做供应商错误码/审核词归类。声明式 400/422 走 `protocolRelayHTTPError`；`task_not_exist`/5xx 仍保留 `providerHTTPError`。
+- 已实现：Seedance 族插件用 `$parseJSON` 读取中转信封 `message` 内层方舟 `error.code`，`fail_to_fetch_task` 包一层时也能映射中文审核文案。
 - 线上验收（aixinju，2026-09-28）：敏感提示词任务失败文案为「提示词未通过内容安全审核，请修改后重试」。
 - [ ] 安装 `neolink-seedance.yingce-plugin` 后新建系统渠道：协议选 NeoLink Seedance，Base `https://neolink.com/api`，配置 Key 与模型等；管理端模型测试创建与轮询成功。
 - [x] 用敏感提示词触发失败：应显示「提示词未通过内容安全审核，请修改后重试」（API 已验）。
