@@ -7,9 +7,9 @@
 - 能力：`video`。
 - 默认 Base URL：`https://ark.cn-beijing.volces.com`。
 - 鉴权驱动：`bearer`。
-- 创建：`POST /api/v3/contents/generations/tasks`。
-- 查询：`GET /api/v3/contents/generations/tasks/{{taskId}}`。
-- 取消：`DELETE /api/v3/contents/generations/tasks/{{taskId}}`。
+- 创建：`POST /contents/generations/tasks`。
+- 查询：`GET /contents/generations/tasks/{{taskId}}`。
+- 取消：`DELETE /contents/generations/tasks/{{taskId}}`。
 
 ## 配置字段
 
@@ -41,7 +41,7 @@
 | 上游位置 | 值或转换表达式 |
 | --- | --- |
 | `create.method` | `"POST"` |
-| `create.path` | `"/api/v3/contents/generations/tasks"` |
+| `create.path` | `"/contents/generations/tasks"` |
 | `create.contentType` | `"application/json"` |
 | `create.body.model` | `{"$ref":"request.model"}` |
 | `create.body.content` | `{"$concatArrays":[[{"type":"text","text":{"$ref":"request.prompt"}}],{"$map":{"from":{"$sortByOrder":{"$ref":"request.images"}},"as":"media","in":{"type":"image_url","image_url":{"url":{"$ref":"media.value"}},"role":{"$coalesce":[{"$ref":"media.role"},"reference_image"]}}}},{"$map":{"from":{"$sortByOrder":{"$ref":"request.videos"}},"as":"media","in":{"type":"video_url","video_url":{"url":{"$ref":"media.value"}},"role":{"$coalesce":[{"$ref":"media.role"},"reference_video"]}}}},{"$map":{"from":{"$sortByOrder":{"$ref":"request.audios"}},"as":"media","in":{"type":"audio_url","audio_url":{"url":{"$ref":"media.value"}},"role":{"$coalesce":[{"$ref":"media.role"},"reference_audio"]}}}}]}` |
@@ -53,10 +53,10 @@
 | `create.body.seed` | `{"$omitEmpty":{"$ref":"request.providerOptions.volcengine-ark-video.seed"}}` |
 | `create.body.camera_fixed` | `{"$omitEmpty":{"$ref":"request.providerOptions.volcengine-ark-video.camera_fixed"}}` |
 | `poll.method` | `"GET"` |
-| `poll.path` | `"/api/v3/contents/generations/tasks/{{taskId}}"` |
+| `poll.path` | `"/contents/generations/tasks/{{taskId}}"` |
 | `poll.contentType` | `"application/json"` |
 | `cancel.method` | `"DELETE"` |
-| `cancel.path` | `"/api/v3/contents/generations/tasks/{{taskId}}"` |
+| `cancel.path` | `"/contents/generations/tasks/{{taskId}}"` |
 | `cancel.contentType` | `"application/json"` |
 
 ## Provider 扩展键
@@ -300,7 +300,7 @@
         ],
         "create": {
           "method": "POST",
-          "path": "/api/v3/contents/generations/tasks",
+          "path": "/contents/generations/tasks",
           "contentType": "application/json",
           "body": {
             "model": {
@@ -448,11 +448,11 @@
         },
         "poll": {
           "method": "GET",
-          "path": "/api/v3/contents/generations/tasks/{{taskId}}"
+          "path": "/contents/generations/tasks/{{taskId}}"
         },
         "cancel": {
           "method": "DELETE",
-          "path": "/api/v3/contents/generations/tasks/{{taskId}}"
+          "path": "/contents/generations/tasks/{{taskId}}"
         },
         "response": {
           "taskId": {
