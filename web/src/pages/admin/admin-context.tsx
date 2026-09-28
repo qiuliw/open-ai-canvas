@@ -10,7 +10,7 @@ type AdminContextValue = {
     updateUserReference: (user: LocalUser) => void;
 };
 
-const emptyReferences: AdminReferenceData = { users: [], channels: [] };
+const emptyReferences: AdminReferenceData = { users: [], channels: [], discountGroups: [] };
 const AdminContext = createContext<AdminContextValue | null>(null);
 
 export function AdminProvider({ children }: { children: ReactNode }) {
@@ -21,7 +21,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     const reloadReferences = useCallback(async () => {
         setReferencesLoading(true);
         try {
-            setReferences(await getAdminReferences());
+            const data = await getAdminReferences();
+            setReferences({
+                users: data.users || [],
+                channels: data.channels || [],
+                discountGroups: data.discountGroups || [],
+            });
         } catch (error) {
             message.error(error instanceof Error ? error.message : "读取后台基础数据失败");
         } finally {

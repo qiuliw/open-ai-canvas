@@ -24,11 +24,12 @@ type CreateAdminUserRequest struct {
 	Status      model.UserStatus `json:"status"`
 }
 type UpdateUserRequest struct {
-	DisplayName string           `json:"displayName"`
-	Email       string           `json:"email"`
-	Password    string           `json:"password"`
-	Role        model.UserRole   `json:"role"`
-	Status      model.UserStatus `json:"status"`
+	DisplayName     string           `json:"displayName"`
+	Email           string           `json:"email"`
+	Password        string           `json:"password"`
+	Role            model.UserRole   `json:"role"`
+	Status          model.UserStatus `json:"status"`
+	DiscountGroupID *string          `json:"discountGroupId"`
 }
 
 type BulkDisableUsersRequest struct {
@@ -57,8 +58,9 @@ type AdminUserPage struct {
 
 type AdminUser struct {
 	model.User
-	AvailableMicrocredits int64 `json:"availableMicrocredits"`
-	ReservedMicrocredits  int64 `json:"reservedMicrocredits"`
+	AvailableMicrocredits int64  `json:"availableMicrocredits"`
+	ReservedMicrocredits  int64  `json:"reservedMicrocredits"`
+	DiscountGroupName     string `json:"discountGroupName,omitempty"`
 }
 
 type AdminChannelPage struct {
@@ -83,8 +85,9 @@ type AdminChannelReference struct {
 }
 
 type AdminReferenceData struct {
-	Users    []AdminUserReference    `json:"users"`
-	Channels []AdminChannelReference `json:"channels"`
+	Users          []AdminUserReference          `json:"users"`
+	Channels       []AdminChannelReference       `json:"channels"`
+	DiscountGroups []AdminDiscountGroupReference `json:"discountGroups"`
 }
 
 type ChannelRequest struct {
@@ -168,10 +171,40 @@ func (s *Service) AdminUsers(actor *model.User, query AdminListQuery) (*AdminUse
 	for _, account := range accounts {
 		accountByUserID[account.UserID] = account
 	}
+	groupIDs := make([]string, 0)
+	seenGroups := make(map[string]struct{})
+	for _, user := range users {
+		if user.DiscountGroupID == nil {
+			continue
+		}
+		id := strings.TrimSpace(*user.DiscountGroupID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seenGroups[id]; exists {
+			continue
+		}
+		seenGroups[id] = struct{}{}
+		groupIDs = append(groupIDs, id)
+	}
+	groupNameByID := map[string]string{}
+	if len(groupIDs) > 0 {
+		groups, err := s.repo.DiscountGroupsByIDs(groupIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, group := range groups {
+			groupNameByID[group.ID] = group.Name
+		}
+	}
 	result := make([]AdminUser, 0, len(users))
 	for _, user := range users {
 		account := accountByUserID[user.ID]
-		result = append(result, AdminUser{User: user, AvailableMicrocredits: account.AvailableMicrocredits, ReservedMicrocredits: account.ReservedMicrocredits})
+		item := AdminUser{User: user, AvailableMicrocredits: account.AvailableMicrocredits, ReservedMicrocredits: account.ReservedMicrocredits}
+		if user.DiscountGroupID != nil {
+			item.DiscountGroupName = groupNameByID[strings.TrimSpace(*user.DiscountGroupID)]
+		}
+		result = append(result, item)
 	}
 	return &AdminUserPage{Users: result, Total: total, Page: page, Limit: limit}, nil
 }
@@ -188,6 +221,10 @@ func (s *Service) AdminReferences(actor *model.User) (*AdminReferenceData, error
 	if err != nil {
 		return nil, err
 	}
+	discountGroups, err := s.repo.AdminDiscountGroupReferences()
+	if err != nil {
+		return nil, err
+	}
 	channelIDs := make([]string, 0, len(channels))
 	for _, channel := range channels {
 		channelIDs = append(channelIDs, channel.ID)
@@ -201,8 +238,9 @@ func (s *Service) AdminReferences(actor *model.User) (*AdminReferenceData, error
 		modelsByChannel[item.ChannelID] = append(modelsByChannel[item.ChannelID], item)
 	}
 	result := &AdminReferenceData{
-		Users:    make([]AdminUserReference, 0, len(users)),
-		Channels: make([]AdminChannelReference, 0, len(channels)),
+		Users:          make([]AdminUserReference, 0, len(users)),
+		Channels:       make([]AdminChannelReference, 0, len(channels)),
+		DiscountGroups: make([]AdminDiscountGroupReference, 0, len(discountGroups)),
 	}
 	for _, user := range users {
 		result.Users = append(result.Users, AdminUserReference{ID: user.ID, Username: user.Username, DisplayName: user.DisplayName})
@@ -218,6 +256,9 @@ func (s *Service) AdminReferences(actor *model.User) (*AdminReferenceData, error
 			displayNames = append(displayNames, firstNonEmpty(strings.TrimSpace(item.DisplayName), item.ModelKey))
 		}
 		result.Channels = append(result.Channels, AdminChannelReference{ID: channel.ID, Name: channel.Name, Enabled: channel.Enabled, Models: uniqueNonEmpty(models), ModelDisplayNames: uniqueNonEmpty(displayNames)})
+	}
+	for _, group := range discountGroups {
+		result.DiscountGroups = append(result.DiscountGroups, AdminDiscountGroupReference{ID: group.ID, Name: group.Name, Enabled: group.Enabled})
 	}
 	return result, nil
 }
@@ -361,13 +402,34 @@ func (s *Service) UpdateUser(actor *model.User, userID string, req UpdateUserReq
 			return nil, fmt.Errorf("清理旧登录会话失败，密码未更新：%w", err)
 		}
 	}
+	if req.DiscountGroupID != nil {
+		groupID := strings.TrimSpace(*req.DiscountGroupID)
+		if groupID == "" {
+			user.DiscountGroupID = nil
+		} else {
+			group, err := s.repo.DiscountGroup(groupID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, BadAuthRequest("折扣分组不存在")
+			}
+			if err != nil {
+				return nil, err
+			}
+			user.DiscountGroupID = &group.ID
+		}
+	}
 	user.Role = nextRole
 	user.Status = nextStatus
 	user.UpdatedAt = time.Now()
 	if err := s.repo.Save(user); err != nil {
 		return nil, err
 	}
-	if err := s.appendAdminAudit(actor, "user.update", "user", user.ID, "更新用户账号状态或资料", map[string]any{"role": user.Role, "status": user.Status}); err != nil {
+	auditMeta := map[string]any{"role": user.Role, "status": user.Status}
+	if user.DiscountGroupID != nil {
+		auditMeta["discountGroupId"] = *user.DiscountGroupID
+	} else if req.DiscountGroupID != nil {
+		auditMeta["discountGroupId"] = ""
+	}
+	if err := s.appendAdminAudit(actor, "user.update", "user", user.ID, "更新用户账号状态或资料", auditMeta); err != nil {
 		return nil, err
 	}
 	return user, nil

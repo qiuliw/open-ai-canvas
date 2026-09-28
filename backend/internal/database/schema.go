@@ -55,6 +55,7 @@ func Models() []any {
 		&model.PaymentReconciliationItem{},
 		&model.RedeemBatch{},
 		&model.RedeemCode{},
+		&model.DiscountGroup{},
 		&model.AdminAuditEvent{},
 		&model.UserDailyActivity{},
 		&model.SystemSetting{},
@@ -185,6 +186,14 @@ func migrateSchemaV35(db *gorm.DB) error {
 		return err
 	}
 	return db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_nonempty ON users(phone) WHERE phone <> ''").Error
+}
+
+// migrateSchemaV39 增加折扣分组表，并为用户增加可空的 discount_group_id。
+func migrateSchemaV39(db *gorm.DB) error {
+	if err := db.AutoMigrate(&model.DiscountGroup{}, &model.User{}); err != nil {
+		return fmt.Errorf("创建折扣分组结构：%w", err)
+	}
+	return nil
 }
 
 func backfillProjectUnitWordCounts(db *gorm.DB) error {

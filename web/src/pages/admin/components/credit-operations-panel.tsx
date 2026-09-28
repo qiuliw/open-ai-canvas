@@ -10,6 +10,7 @@ import { listAdminUsers, type AdminReferenceData, type AdminUser } from "@/servi
 import { adjustAdminUserCredits, getAdminCreditPolicy, listAdminBillingOrders, resolveAdminBillingOrder, resolveAdminBillingOrders, updateAdminCreditPolicy, type BillingOrder } from "@/services/api/wallet";
 
 import { AdminBatchBar, AdminDataTable, AdminRowActions, AdminStatusBadge, AdminTableEmpty } from "./admin-ui";
+import DiscountGroupsPanel from "./discount-groups-panel";
 import { Select } from "@/components/ui/base/select";
 
 export type CreditOperation = "policy" | "adjustment" | null;
@@ -30,7 +31,7 @@ const billingStatusLabels = {
     refunded: "已退款",
 } satisfies Record<BillingOrder["status"], string>;
 
-export default function CreditOperationsPanel({ users, activeOperation, onOperationChange }: { users: AdminReferenceData["users"]; activeOperation: CreditOperation; onOperationChange: (operation: CreditOperation) => void }) {
+export default function CreditOperationsPanel({ users, activeOperation, onOperationChange, onGroupsChanged }: { users: AdminReferenceData["users"]; activeOperation: CreditOperation; onOperationChange: (operation: CreditOperation) => void; onGroupsChanged?: () => void }) {
     const { message } = App.useApp();
     const [orders, setOrders] = useState<BillingOrder[]>([]);
     const [loading, setLoading] = useState(true);
@@ -468,9 +469,9 @@ export default function CreditOperationsPanel({ users, activeOperation, onOperat
             </section>
 
             <Drawer
-                title="积分策略"
+                title="折扣策略"
                 open={activeOperation === "policy"}
-                size="min(700px, 100vw)"
+                size="min(760px, 100vw)"
                 onClose={() => {
                     if (!savingPolicy) onOperationChange(null);
                 }}
@@ -585,6 +586,8 @@ export default function CreditOperationsPanel({ users, activeOperation, onOperat
                         </section>
                     </Form>
                 )}
+
+                <DiscountGroupsPanel active={activeOperation === "policy"} onGroupsChanged={onGroupsChanged} />
             </Drawer>
 
             <Drawer

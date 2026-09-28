@@ -18,7 +18,7 @@ func TestImageSpecificationQuoteAgreesWithTaskBilling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.ChannelModel{}, &model.ChannelModelPriceTier{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.User{}, &model.DiscountGroup{}, &model.ChannelModel{}, &model.ChannelModelPriceTier{}); err != nil {
 		t.Fatal(err)
 	}
 	channelModel := model.ChannelModel{
@@ -84,7 +84,7 @@ func TestTaskBillingOrderMatchesSystemImagePriceTierFromRequestedSpec(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.SystemSetting{}, &model.ChannelModel{}, &model.ChannelModelPriceTier{}); err != nil {
+	if err := db.AutoMigrate(&model.SystemSetting{}, &model.User{}, &model.DiscountGroup{}, &model.ChannelModel{}, &model.ChannelModelPriceTier{}); err != nil {
 		t.Fatal(err)
 	}
 	channelModel := model.ChannelModel{

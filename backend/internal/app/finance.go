@@ -495,15 +495,19 @@ func (s *Service) newLogicalModelBillingOrder(userID string, task *model.Task, i
 	quantity := int64(1)
 	tokenEstimate := estimateTaskBillingTokens(input, capability)
 	amount := int64(0)
+	multiplierBPS, err := s.resolveBillingMultiplierBPS(userID, logicalModel.Code)
+	if err != nil {
+		return nil, err
+	}
 	switch logicalModel.BillingMode {
 	case "fixed_request":
-		amount = logicalModel.UnitPriceMicrocredits
+		amount, err = creditAmount(logicalModel.UnitPriceMicrocredits, 1, multiplierBPS)
 	case "per_second":
 		quantity = billingQuantity(capability, config["videoSeconds"])
 		if capability != "video" || quantity <= 0 {
 			return nil, BadAuthRequest("当前模型按时长计费，但请求未提供有效时长")
 		}
-		amount, err = creditAmount(logicalModel.UnitPriceMicrocredits, quantity, 10_000)
+		amount, err = creditAmount(logicalModel.UnitPriceMicrocredits, quantity, multiplierBPS)
 	case "token":
 		if channelModel.Capability != capability || !supportsTokenBilling(capability, channelModel.Protocol) {
 			return nil, BadAuthRequest("当前供应线路不支持前台模型的 Token 计费方式")
@@ -512,7 +516,7 @@ func (s *Service) newLogicalModelBillingOrder(userID string, task *model.Task, i
 			return nil, BadAuthRequest("视频 Token 仅按视频用量定价，请将输入与缓存价格设为 0")
 		}
 		pricing := &model.ChannelModel{InputTokenPriceMicrocredits: logicalModel.InputPriceMicrocredits, OutputTokenPriceMicrocredits: logicalModel.OutputPriceMicrocredits, CachedTokenPriceMicrocredits: logicalModel.CachedPriceMicrocredits}
-		amount, err = tokenEstimateAmount(pricing, tokenEstimate, 10_000)
+		amount, err = tokenEstimateAmount(pricing, tokenEstimate, multiplierBPS)
 		quantity = tokenEstimate.InputTokens + tokenEstimate.OutputTokens
 	default:
 		return nil, BadAuthRequest("当前模型计费方式暂不支持")
@@ -535,7 +539,7 @@ func (s *Service) newLogicalModelBillingOrder(userID string, task *model.Task, i
 		ID: newID(), UserID: userID, IdempotencyKey: "task:" + task.ID + ":" + newID(), TaskID: task.ID,
 		ChannelID: channelModel.ChannelID, ChannelModelID: channelModel.ID, Model: logicalModel.Code, Capability: capability,
 		Scene: truncateRunes(firstNonEmpty(strings.TrimSpace(task.Operation), task.Type), 80), BillingMode: logicalModel.BillingMode, PriceVersion: int64(revision.Version),
-		UnitPriceMicrocredits: logicalModel.UnitPriceMicrocredits, MultiplierBasisPoints: 10_000, Quantity: quantity, AmountMicrocredits: amount,
+		UnitPriceMicrocredits: logicalModel.UnitPriceMicrocredits, MultiplierBasisPoints: multiplierBPS, Quantity: quantity, AmountMicrocredits: amount,
 		ReservedAmountMicrocredits: amount, InputTokenPriceMicrocredits: logicalModel.InputPriceMicrocredits,
 		OutputTokenPriceMicrocredits: logicalModel.OutputPriceMicrocredits, CachedTokenPriceMicrocredits: logicalModel.CachedPriceMicrocredits,
 		VideoFormulaTokens: videoFormulaTokens,
@@ -623,13 +627,9 @@ func (s *Service) newBillingOrderWithPriceTier(userID string, taskID string, ide
 	default:
 		return nil, BadAuthRequest("当前模型计费方式暂不支持")
 	}
-	policy, err := s.creditPolicy()
+	multiplierBPS, err := s.resolveBillingMultiplierBPS(userID, modelKey)
 	if err != nil {
 		return nil, err
-	}
-	multiplierBPS := policy.DefaultMultiplierBPS
-	if configured := policy.ModelMultiplierBPS[modelKey]; configured > 0 {
-		multiplierBPS = configured
 	}
 	if tier.BillingMode == "token" {
 		amount, err = tokenEstimateAmount(&model.ChannelModel{InputTokenPriceMicrocredits: tier.InputTokenPriceMicrocredits, OutputTokenPriceMicrocredits: tier.OutputTokenPriceMicrocredits, CachedTokenPriceMicrocredits: tier.CachedTokenPriceMicrocredits}, tokenEstimate, multiplierBPS)
