@@ -1,11 +1,11 @@
-# Volcengine Ark Seedance 接口字段
+# NeoLink Seedance 接口字段
 
 ## 协议身份
 
-- 插件 ID：`volcengine-ark-seedance`。
-- Provider ID：`volcengine-ark-video`。
+- 插件 ID：`neolink-seedance`。
+- Provider ID：`neolink-seedance`。
 - 能力：`video`。
-- 默认 Base URL：`https://ark.cn-beijing.volces.com`。
+- 默认 Base URL：`https://neolink.com/api`。
 - 鉴权驱动：`bearer`。
 - 创建：`POST /contents/generations/tasks`。
 - 查询：`GET /contents/generations/tasks/{{taskId}}`。
@@ -50,8 +50,8 @@
 | `create.body.duration` | `{"$if":{"condition":{"$gt":[{"$ref":"request.duration"},0]},"then":{"$ref":"request.duration"},"else":5}}` |
 | `create.body.generate_audio` | `{"$ref":"request.generateAudio"}` |
 | `create.body.watermark` | `{"$ref":"request.watermark"}` |
-| `create.body.seed` | `{"$omitEmpty":{"$ref":"request.providerOptions.volcengine-ark-video.seed"}}` |
-| `create.body.camera_fixed` | `{"$omitEmpty":{"$ref":"request.providerOptions.volcengine-ark-video.camera_fixed"}}` |
+| `create.body.seed` | `{"$omitEmpty":{"$ref":"request.providerOptions.neolink-seedance.seed"}}` |
+| `create.body.camera_fixed` | `{"$omitEmpty":{"$ref":"request.providerOptions.neolink-seedance.camera_fixed"}}` |
 | `poll.method` | `"GET"` |
 | `poll.path` | `"/contents/generations/tasks/{{taskId}}"` |
 | `poll.contentType` | `"application/json"` |
@@ -61,8 +61,8 @@
 
 ## Provider 扩展键
 
-- `providerOptions.volcengine-ark-video.camera_fixed`
-- `providerOptions.volcengine-ark-video.seed`
+- `providerOptions.neolink-seedance.camera_fixed`
+- `providerOptions.neolink-seedance.seed`
 
 动态模型或工作流允许使用文档声明的完整 `parameters/input/extra_body` 对象；该对象是协议本身的开放 schema，不会被宿主裁剪。
 
@@ -87,7 +87,7 @@
 
 ## 兼容边界
 
-官方 Ark 推理接入：创建/查询/取消 path 为 /contents/generations/tasks，版本段放在渠道 Base URL（如 …/api/v3）。插件不根据图片下标推断首尾帧，role 由业务层确定。API Key 来自方舟推理接入控制台。
+NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但默认 Base 为 https://neolink.com/api，path 为 /contents/generations/tasks（不写死 /api/v3）。宿主会默认再拼 /v1，实际上游为 /api/v1/contents/...。勿与官方 volcengine-ark-seedance 混用同一渠道配置。
 
 <!-- YINGCE_MANIFEST_CONTRACT_START -->
 ## Manifest 完整接口定义
@@ -97,11 +97,11 @@
 ```json
 {
   "apiVersion": "yingce.plugin/v2",
-  "id": "volcengine-ark-seedance",
-  "name": "Volcengine Ark Seedance",
+  "id": "neolink-seedance",
+  "name": "NeoLink Seedance",
   "version": "2.0.0",
-  "author": "Volcengine / 影策",
-  "description": "Volcengine Ark Seedance 独立请求协议插件。",
+  "author": "NeoLink / 影策",
+  "description": "NeoLink Seedance 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
   "permissions": [
     "generation.run",
@@ -120,8 +120,8 @@
   "contributes": {
     "providers": [
       {
-        "id": "volcengine-ark-video",
-        "label": "Volcengine Ark Seedance",
+        "id": "neolink-seedance",
+        "label": "NeoLink Seedance",
         "capabilities": [
           "video"
         ],
@@ -132,7 +132,7 @@
           "creation",
           "agent"
         ],
-        "baseUrl": "https://ark.cn-beijing.volces.com",
+        "baseUrl": "https://neolink.com/api",
         "requiresPublicMediaUrls": true,
         "auth": {
           "type": "bearer",
@@ -439,12 +439,12 @@
             },
             "seed": {
               "$omitEmpty": {
-                "$ref": "request.providerOptions.volcengine-ark-video.seed"
+                "$ref": "request.providerOptions.neolink-seedance.seed"
               }
             },
             "camera_fixed": {
               "$omitEmpty": {
-                "$ref": "request.providerOptions.volcengine-ark-video.camera_fixed"
+                "$ref": "request.providerOptions.neolink-seedance.camera_fixed"
               }
             }
           }

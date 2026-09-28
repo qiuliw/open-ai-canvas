@@ -459,13 +459,44 @@ const arkSeedanceBody = (optionNamespace) => ({
   camera_fixed: omit(ref(`request.providerOptions.${optionNamespace}.camera_fixed`))
 });
 
+// Seedance/Ark 敏感错误码由插件映射为可读中文；宿主不做厂商码归类。
+const arkSeedanceErrorMessage = {
+  $switch: {
+    cases: [
+      {
+        when: { $in: [ref("response.error.code"), [
+          "InputTextSensitiveContentDetected",
+          "OutputTextSensitiveContentDetected"
+        ]] },
+        then: "提示词未通过内容安全审核，请修改后重试"
+      },
+      {
+        when: eq(ref("response.error.code"), "InputImageSensitiveContentDetected.PrivacyInformation"),
+        then: "输入图片疑似包含真人形象，请更换素材或改用其他模型"
+      },
+      {
+        when: { $in: [ref("response.error.code"), [
+          "InputImageSensitiveContentDetected",
+          "OutputImageSensitiveContentDetected",
+          "InputVideoSensitiveContentDetected",
+          "OutputVideoSensitiveContentDetected",
+          "SensitiveContentDetected"
+        ]] },
+        then: "内容未通过安全审核，请调整素材或提示词后重试"
+      }
+    ],
+    default: coalesce(ref("response.error.message"), ref("response.message"), ref("response.fail_reason"))
+  }
+};
+
 const arkSeedanceResponse = {
   taskId: coalesce(ref("response.id"), ref("response.task_id"), ref("response.data.id"), ref("taskId")),
   status: coalesce(ref("response.status"), ref("response.data.status"), "pending"),
-  message: coalesce(ref("response.error.message"), ref("response.message"), ref("response.fail_reason")),
+  message: arkSeedanceErrorMessage,
   videos: coalesce(ref("response.content.video_url"), ref("response.video_url"), ref("response.output.video_url"), ref("response.data.video_url")),
   usage: ref("response.usage"),
   errorPaths: ["error.code"],
+  messagePaths: ["error.message", "message", "fail_reason"],
   resultEphemeral: true
 };
 
@@ -473,8 +504,19 @@ add({
   id: "volcengine-ark-seedance", providerId: "volcengine-ark-video", name: "Volcengine Ark Seedance", vendor: "Volcengine", capability: "video",
   baseUrl: "https://ark.cn-beijing.volces.com", auth: bearer, params: arkSeedanceParams, requiresPublicMediaUrls: true,
   validations: arkSeedanceValidations,
-  notes: "官方 Ark 推理接入：创建/查询/取消走 /api/v3/contents/generations/tasks；插件不根据图片下标推断首尾帧，role 由业务层确定。API Key 来自方舟推理接入控制台。",
+  notes: "官方 Ark 推理接入：创建/查询/取消 path 为 /contents/generations/tasks，版本段放在渠道 Base URL（如 …/api/v3）。插件不根据图片下标推断首尾帧，role 由业务层确定。API Key 来自方舟推理接入控制台。",
   create: jsonCreate("/contents/generations/tasks", arkSeedanceBody("volcengine-ark-video")),
+  poll: { method: "GET", path: "/contents/generations/tasks/{{taskId}}" },
+  cancel: { method: "DELETE", path: "/contents/generations/tasks/{{taskId}}" },
+  response: arkSeedanceResponse
+});
+
+add({
+  id: "neolink-seedance", providerId: "neolink-seedance", name: "NeoLink Seedance", vendor: "NeoLink", capability: "video",
+  baseUrl: "https://neolink.com/api", auth: bearer, params: arkSeedanceParams, requiresPublicMediaUrls: true,
+  validations: arkSeedanceValidations,
+  notes: "NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但默认 Base 为 https://neolink.com/api，path 为 /contents/generations/tasks（不写死 /api/v3）。宿主会默认再拼 /v1，实际上游为 /api/v1/contents/...。勿与官方 volcengine-ark-seedance 混用同一渠道配置。",
+  create: jsonCreate("/contents/generations/tasks", arkSeedanceBody("neolink-seedance")),
   poll: { method: "GET", path: "/contents/generations/tasks/{{taskId}}" },
   cancel: { method: "DELETE", path: "/contents/generations/tasks/{{taskId}}" },
   response: arkSeedanceResponse

@@ -75,6 +75,7 @@ const (
 	ChannelInterfaceXAIVideo                    ChannelInterfaceType = "xai-video"
 	ChannelInterfaceVolcengineArkVideo          ChannelInterfaceType = "volcengine-ark-video"
 	ChannelInterfaceVolcengineArkAgentPlanVideo ChannelInterfaceType = "volcengine-ark-agent-plan-video"
+	ChannelInterfaceNeolinkSeedance             ChannelInterfaceType = "neolink-seedance"
 	ChannelInterfaceVolcengineJiMengVideo       ChannelInterfaceType = "volcengine-jimeng-video"
 	ChannelInterfaceGeminiVeo                   ChannelInterfaceType = "gemini-veo"
 	ChannelInterfaceNovitaVideo                 ChannelInterfaceType = "novita-video"
