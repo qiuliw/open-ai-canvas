@@ -696,7 +696,7 @@ func TestDeclarativeHTTPErrorJSONUsesPluginMessagePassthrough(t *testing.T) {
 			config := providerConfig{BaseURL: server.URL, APIKey: "key", Model: "doubao-seedance-2-0-mini-260615", InterfaceType: "volcengine-ark-video", VideoSeconds: "5", Size: "16:9", VQuality: "720p"}
 			_, err = runProtocolAdapterTaskWithPolicy(context.Background(), canvasGenerationInput{Mode: "video", Prompt: "test", Config: config}, adapters[0], fastVideoPollPolicy())
 			got := taskFailureMessage(err)
-			if !strings.Contains(got, "提示词未通过内容安全审核") {
+			if !strings.Contains(got, "提示词敏感") {
 				t.Fatalf("error = %q, want plugin-mapped Chinese message", got)
 			}
 			if strings.Contains(got, "真人形象") || strings.Contains(got, "secret-trace") || strings.Contains(got, "InputTextSensitiveContentDetected") || strings.Contains(got, "fail_to_fetch_task") {

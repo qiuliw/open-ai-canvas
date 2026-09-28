@@ -72,7 +72,7 @@
 | --- | --- |
 | `response.taskId` | `{"$coalesce":[{"$ref":"response.id"},{"$ref":"response.task_id"},{"$ref":"response.data.id"},{"$ref":"taskId"}]}` |
 | `response.status` | `{"$coalesce":[{"$ref":"response.status"},{"$ref":"response.data.status"},{"$if":{"condition":{"$ne":[{"$coalesce":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},""]},""]},"then":"failed","else":null}},"pending"]}` |
-| `response.message` | `{"$switch":{"cases":[{"when":{"$in":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},["InputTextSensitiveContentDetected","OutputTextSensitiveContentDetected"]]},"then":"提示词未通过内容安全审核，请修改后重试"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"InputImageSensitiveContentDetected.PrivacyInformation"]},"then":"输入图片疑似包含真人形象，请更换素材或改用其他模型"},{"when":{"$in":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},["InputImageSensitiveContentDetected","OutputImageSensitiveContentDetected","InputVideoSensitiveContentDetected","OutputVideoSensitiveContentDetected","SensitiveContentDetected"]]},"then":"内容未通过安全审核，请调整素材或提示词后重试"}],"default":{"$coalesce":[{"$ref":"response.error.message"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.message"}},{"$ref":"response.message"},{"$ref":"response.fail_reason"}]}}}` |
+| `response.message` | `{"$switch":{"cases":[{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"InputTextSensitiveContentDetected"]},"then":"提示词敏感，请修改后重试"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"OutputTextSensitiveContentDetected"]},"then":"生成文本敏感，请调整提示词后重试"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"InputImageSensitiveContentDetected.PrivacyInformation"]},"then":"参考图疑似真人形象，请更换素材或改用其他模型"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"InputImageSensitiveContentDetected"]},"then":"参考图敏感，请更换后重试"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"OutputImageSensitiveContentDetected"]},"then":"生成画面敏感，请调整提示词或素材后重试"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"InputVideoSensitiveContentDetected"]},"then":"参考视频敏感，请更换后重试"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"OutputVideoSensitiveContentDetected"]},"then":"生成视频敏感，请调整提示词或素材后重试"},{"when":{"$eq":[{"$coalesce":[{"$ref":"response.error.code"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.code"}}]},"SensitiveContentDetected"]},"then":"内容敏感，请调整提示词或素材后重试"}],"default":{"$coalesce":[{"$ref":"response.error.message"},{"$parseJSON":{"from":{"$ref":"response.message"},"path":"error.message"}},{"$ref":"response.message"},{"$ref":"response.fail_reason"}]}}}` |
 | `response.videos` | `{"$coalesce":[{"$ref":"response.content.video_url"},{"$ref":"response.video_url"},{"$ref":"response.output.video_url"},{"$ref":"response.data.video_url"}]}` |
 | `response.usage` | `{"$ref":"response.usage"}` |
 | `response.errorPaths[0]` | `"error.code"` |
@@ -521,7 +521,7 @@ NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但�
               "cases": [
                 {
                   "when": {
-                    "$in": [
+                    "$eq": [
                       {
                         "$coalesce": [
                           {
@@ -537,13 +537,33 @@ NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但�
                           }
                         ]
                       },
-                      [
-                        "InputTextSensitiveContentDetected",
-                        "OutputTextSensitiveContentDetected"
-                      ]
+                      "InputTextSensitiveContentDetected"
                     ]
                   },
-                  "then": "提示词未通过内容安全审核，请修改后重试"
+                  "then": "提示词敏感，请修改后重试"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$coalesce": [
+                          {
+                            "$ref": "response.error.code"
+                          },
+                          {
+                            "$parseJSON": {
+                              "from": {
+                                "$ref": "response.message"
+                              },
+                              "path": "error.code"
+                            }
+                          }
+                        ]
+                      },
+                      "OutputTextSensitiveContentDetected"
+                    ]
+                  },
+                  "then": "生成文本敏感，请调整提示词后重试"
                 },
                 {
                   "when": {
@@ -566,11 +586,11 @@ NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但�
                       "InputImageSensitiveContentDetected.PrivacyInformation"
                     ]
                   },
-                  "then": "输入图片疑似包含真人形象，请更换素材或改用其他模型"
+                  "then": "参考图疑似真人形象，请更换素材或改用其他模型"
                 },
                 {
                   "when": {
-                    "$in": [
+                    "$eq": [
                       {
                         "$coalesce": [
                           {
@@ -586,16 +606,102 @@ NeoLink Seedance 独立协议插件：请求体与方舟 contents 一致，但�
                           }
                         ]
                       },
-                      [
-                        "InputImageSensitiveContentDetected",
-                        "OutputImageSensitiveContentDetected",
-                        "InputVideoSensitiveContentDetected",
-                        "OutputVideoSensitiveContentDetected",
-                        "SensitiveContentDetected"
-                      ]
+                      "InputImageSensitiveContentDetected"
                     ]
                   },
-                  "then": "内容未通过安全审核，请调整素材或提示词后重试"
+                  "then": "参考图敏感，请更换后重试"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$coalesce": [
+                          {
+                            "$ref": "response.error.code"
+                          },
+                          {
+                            "$parseJSON": {
+                              "from": {
+                                "$ref": "response.message"
+                              },
+                              "path": "error.code"
+                            }
+                          }
+                        ]
+                      },
+                      "OutputImageSensitiveContentDetected"
+                    ]
+                  },
+                  "then": "生成画面敏感，请调整提示词或素材后重试"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$coalesce": [
+                          {
+                            "$ref": "response.error.code"
+                          },
+                          {
+                            "$parseJSON": {
+                              "from": {
+                                "$ref": "response.message"
+                              },
+                              "path": "error.code"
+                            }
+                          }
+                        ]
+                      },
+                      "InputVideoSensitiveContentDetected"
+                    ]
+                  },
+                  "then": "参考视频敏感，请更换后重试"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$coalesce": [
+                          {
+                            "$ref": "response.error.code"
+                          },
+                          {
+                            "$parseJSON": {
+                              "from": {
+                                "$ref": "response.message"
+                              },
+                              "path": "error.code"
+                            }
+                          }
+                        ]
+                      },
+                      "OutputVideoSensitiveContentDetected"
+                    ]
+                  },
+                  "then": "生成视频敏感，请调整提示词或素材后重试"
+                },
+                {
+                  "when": {
+                    "$eq": [
+                      {
+                        "$coalesce": [
+                          {
+                            "$ref": "response.error.code"
+                          },
+                          {
+                            "$parseJSON": {
+                              "from": {
+                                "$ref": "response.message"
+                              },
+                              "path": "error.code"
+                            }
+                          }
+                        ]
+                      },
+                      "SensitiveContentDetected"
+                    ]
+                  },
+                  "then": "内容敏感，请调整提示词或素材后重试"
                 }
               ],
               "default": {

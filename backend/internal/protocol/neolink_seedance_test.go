@@ -60,12 +60,12 @@ func TestNeolinkSeedanceMapsSensitiveErrorCodesToChinese(t *testing.T) {
 		{
 			name: "text sensitive",
 			body: `{"id":"task-1","status":"failed","error":{"code":"InputTextSensitiveContentDetected","message":"The request failed because the input text may contain sensitive information. Request id: secret"}}`,
-			want: "提示词未通过内容安全审核，请修改后重试",
+			want: "提示词敏感，请修改后重试",
 		},
 		{
 			name: "real person image",
 			body: `{"id":"task-1","status":"failed","error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"may contain real person. Request id: secret"}}`,
-			want: "输入图片疑似包含真人形象，请更换素材或改用其他模型",
+			want: "参考图疑似真人形象，请更换素材或改用其他模型",
 		},
 		{
 			name: "unknown code keeps upstream message",
@@ -75,7 +75,7 @@ func TestNeolinkSeedanceMapsSensitiveErrorCodesToChinese(t *testing.T) {
 		{
 			name: "gateway wraps ark error json in message string",
 			body: `{"code":"fail_to_fetch_task","data":null,"message":"{\"error\":{\"code\":\"InputTextSensitiveContentDetected\",\"message\":\"The request failed because the input text 'content[0]' may contain sensitive information. Request id: secret\",\"type\":\"BadRequest\"}}"}`,
-			want: "提示词未通过内容安全审核，请修改后重试",
+			want: "提示词敏感，请修改后重试",
 		},
 	}
 	for _, tt := range tests {

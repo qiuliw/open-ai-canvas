@@ -475,25 +475,36 @@ const arkSeedanceErrorMessage = {
   $switch: {
     cases: [
       {
-        when: { $in: [seedanceErrorCode, [
-          "InputTextSensitiveContentDetected",
-          "OutputTextSensitiveContentDetected"
-        ]] },
-        then: "提示词未通过内容安全审核，请修改后重试"
+        when: eq(seedanceErrorCode, "InputTextSensitiveContentDetected"),
+        then: "提示词敏感，请修改后重试"
+      },
+      {
+        when: eq(seedanceErrorCode, "OutputTextSensitiveContentDetected"),
+        then: "生成文本敏感，请调整提示词后重试"
       },
       {
         when: eq(seedanceErrorCode, "InputImageSensitiveContentDetected.PrivacyInformation"),
-        then: "输入图片疑似包含真人形象，请更换素材或改用其他模型"
+        then: "参考图疑似真人形象，请更换素材或改用其他模型"
       },
       {
-        when: { $in: [seedanceErrorCode, [
-          "InputImageSensitiveContentDetected",
-          "OutputImageSensitiveContentDetected",
-          "InputVideoSensitiveContentDetected",
-          "OutputVideoSensitiveContentDetected",
-          "SensitiveContentDetected"
-        ]] },
-        then: "内容未通过安全审核，请调整素材或提示词后重试"
+        when: eq(seedanceErrorCode, "InputImageSensitiveContentDetected"),
+        then: "参考图敏感，请更换后重试"
+      },
+      {
+        when: eq(seedanceErrorCode, "OutputImageSensitiveContentDetected"),
+        then: "生成画面敏感，请调整提示词或素材后重试"
+      },
+      {
+        when: eq(seedanceErrorCode, "InputVideoSensitiveContentDetected"),
+        then: "参考视频敏感，请更换后重试"
+      },
+      {
+        when: eq(seedanceErrorCode, "OutputVideoSensitiveContentDetected"),
+        then: "生成视频敏感，请调整提示词或素材后重试"
+      },
+      {
+        when: eq(seedanceErrorCode, "SensitiveContentDetected"),
+        then: "内容敏感，请调整提示词或素材后重试"
       }
     ],
     default: seedanceErrorText
