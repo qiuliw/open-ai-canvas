@@ -206,19 +206,12 @@ func retryableProtocolMediaDownload(err error) bool {
 	return false
 }
 
-func protocolResultError(message, taskID string, rawBodies ...[]byte) error {
+// message 来自协议插件对上游 response.error.message 的映射，直接拼进任务失败文案，不做归类替换。
+func protocolResultError(message, taskID string) error {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = "上游返回失败状态"
 	}
-	raw := message
-	for _, body := range rawBodies {
-		if text := strings.TrimSpace(string(body)); text != "" {
-			raw = text
-			break
-		}
-	}
-	message = providerErrorWithDetail(message, raw)
 	if taskID == "" {
 		return errors.New(message)
 	}
