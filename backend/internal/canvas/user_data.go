@@ -3,14 +3,14 @@ package canvas
 import (
 	"encoding/json"
 	"errors"
-	"infinite-canvas/backend/internal/kernel"
+	"yingce/backend/internal/kernel"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/repository"
+	"yingce/backend/internal/model"
+	"yingce/backend/internal/repository"
 
 	"gorm.io/gorm"
 )

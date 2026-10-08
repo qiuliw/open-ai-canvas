@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"infinite-canvas/backend/internal/kernel"
+	"yingce/backend/internal/kernel"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"infinite-canvas/backend/internal/outbound"
+	"yingce/backend/internal/outbound"
 )
 
 const (

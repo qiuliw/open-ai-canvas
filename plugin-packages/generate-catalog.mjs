@@ -483,6 +483,17 @@ add({
 });
 
 add({
+  id: "neolink-seedance", providerId: "neolink-seedance-video", name: "NeoLink Seedance", vendor: "NeoLink", capability: "video",
+  baseUrl: "https://ark.cn-beijing.volces.com", auth: bearer, params: arkSeedanceParams, requiresPublicMediaUrls: true,
+  validations: arkSeedanceValidations,
+  notes: "官方 Ark 推理接入：创建/查询/取消走 /api/v3/contents/generations/tasks；插件不根据图片下标推断首尾帧，role 由业务层确定。API Key 来自方舟推理接入控制台。",
+  create: jsonCreate("/contents/generations/tasks", arkSeedanceBody("neolink-seedance-video")),
+  poll: { method: "GET", path: "/contents/generations/tasks/{{taskId}}" },
+  cancel: { method: "DELETE", path: "/contents/generations/tasks/{{taskId}}" },
+  response: arkSeedanceResponse
+});
+
+add({
   id: "volcengine-ark-agent-plan-seedance", providerId: "volcengine-ark-agent-plan-video", name: "Volcengine Ark Agent Plan Seedance", vendor: "Volcengine", capability: "video",
   baseUrl: "https://ark.cn-beijing.volces.com", auth: bearer, params: arkSeedanceParams, requiresPublicMediaUrls: true,
   validations: arkSeedanceValidations,

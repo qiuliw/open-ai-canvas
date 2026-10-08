@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"infinite-canvas/backend/internal/platform"
+	"yingce/backend/internal/platform"
 	"testing"
 	"time"
 )

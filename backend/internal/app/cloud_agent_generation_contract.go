@@ -1,7 +1,7 @@
 package app
 
 import (
-	"infinite-canvas/backend/internal/canvas/contract"
+	"yingce/backend/internal/canvas/contract"
 	"strings"
 )
 

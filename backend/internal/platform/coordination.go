@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"infinite-canvas/backend/internal/kernel"
+	"yingce/backend/internal/kernel"
 	"log"
 	"math/rand/v2"
 	"os"

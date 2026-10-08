@@ -2,7 +2,7 @@ package canvas
 
 import (
 	"encoding/json"
-	"infinite-canvas/backend/internal/kernel"
+	"yingce/backend/internal/kernel"
 	"strings"
 	"time"
 )

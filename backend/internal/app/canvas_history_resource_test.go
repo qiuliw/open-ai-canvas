@@ -2,7 +2,7 @@ package app
 
 import (
 	"errors"
-	"infinite-canvas/backend/internal/model"
+	"yingce/backend/internal/model"
 	"os"
 	"path/filepath"
 	"strings"

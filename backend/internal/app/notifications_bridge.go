@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"infinite-canvas/backend/internal/auth"
-	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/sms"
+	"yingce/backend/internal/auth"
+	"yingce/backend/internal/model"
+	"yingce/backend/internal/sms"
 	"math/big"
 )
 

@@ -2,11 +2,11 @@ package canvas
 
 import (
 	"encoding/json"
-	"infinite-canvas/backend/internal/assets"
+	"yingce/backend/internal/assets"
 	"strings"
 	"testing"
 
-	"infinite-canvas/backend/internal/model"
+	"yingce/backend/internal/model"
 )
 
 func TestCanvasShareTokenHashDoesNotExposeToken(t *testing.T) {

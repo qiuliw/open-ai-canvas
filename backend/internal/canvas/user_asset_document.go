@@ -3,7 +3,7 @@ package canvas
 import (
 	"bytes"
 	"encoding/json"
-	"infinite-canvas/backend/internal/kernel"
+	"yingce/backend/internal/kernel"
 	"math"
 	"strings"
 )
