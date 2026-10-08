@@ -35,6 +35,7 @@ type (
 	AdminChannelPage                       = app.AdminChannelPage
 	AdminChannelReference                  = app.AdminChannelReference
 	AdminCreditAdjustmentRequest           = app.AdminCreditAdjustmentRequest
+	AdminDiscountGroupReference            = app.AdminDiscountGroupReference
 	AdminListQuery                         = app.AdminListQuery
 	AdminLogicalModel                      = app.AdminLogicalModel
 	AdminLogicalRoute                      = app.AdminLogicalRoute
@@ -143,6 +144,8 @@ type (
 	DiagnosticExportRequest                = app.DiagnosticExportRequest
 	DiagnosticPreview                      = app.DiagnosticPreview
 	DiagnosticRuntime                      = app.DiagnosticRuntime
+	DiscountGroupPage                      = app.DiscountGroupPage
+	DiscountGroupRequest                   = app.DiscountGroupRequest
 	DrawingEngineSetting                   = app.DrawingEngineSetting
 	EagleAddItemRequest                    = app.EagleAddItemRequest
 	EagleCreatedItem                       = app.EagleCreatedItem

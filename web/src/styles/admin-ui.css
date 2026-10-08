@@ -6997,7 +6997,8 @@
     box-shadow: var(--admin-card-shadow);
 }
 
-.admin-credit-drawer-section + .admin-credit-drawer-section {
+.admin-credit-drawer-section + .admin-credit-drawer-section,
+.admin-credit-drawer .ant-drawer-body > .admin-credit-drawer-section {
     margin-top: 16px;
 }
 

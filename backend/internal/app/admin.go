@@ -19,11 +19,12 @@ type CreateAdminUserRequest struct {
 }
 
 type UpdateUserRequest struct {
-	DisplayName string           `json:"displayName"`
-	Email       string           `json:"email"`
-	Password    string           `json:"password"`
-	Role        model.UserRole   `json:"role"`
-	Status      model.UserStatus `json:"status"`
+	DisplayName     string           `json:"displayName"`
+	Email           string           `json:"email"`
+	Password        string           `json:"password"`
+	Role            model.UserRole   `json:"role"`
+	Status          model.UserStatus `json:"status"`
+	DiscountGroupID *string          `json:"discountGroupId"`
 }
 
 type BulkDisableUsersRequest struct {
@@ -52,8 +53,9 @@ type AdminUserPage struct {
 
 type AdminUser struct {
 	model.User
-	AvailableMicrocredits int64 `json:"availableMicrocredits"`
-	ReservedMicrocredits  int64 `json:"reservedMicrocredits"`
+	AvailableMicrocredits int64  `json:"availableMicrocredits"`
+	ReservedMicrocredits  int64  `json:"reservedMicrocredits"`
+	DiscountGroupName     string `json:"discountGroupName,omitempty"`
 }
 
 type AdminChannelPage struct {
@@ -78,8 +80,9 @@ type AdminChannelReference struct {
 }
 
 type AdminReferenceData struct {
-	Users    []AdminUserReference    `json:"users"`
-	Channels []AdminChannelReference `json:"channels"`
+	Users          []AdminUserReference          `json:"users"`
+	Channels       []AdminChannelReference       `json:"channels"`
+	DiscountGroups []AdminDiscountGroupReference `json:"discountGroups"`
 }
 
 type ChannelRequest struct {

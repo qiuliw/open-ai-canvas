@@ -7,6 +7,7 @@ import { PaginationBar } from "@/pages/admin/components/admin-ui";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { bulkDisableAdminUsers, deleteAdminUser, listAdminUsers, updateAdminUser, type AdminUser, type LocalUser } from "@/services/api/auth";
 import { useUserStore } from "@/stores/use-user-store";
+import { useAdminContext } from "../admin-context";
 import { AdminBatchBar, AdminDataTable, AdminTableEmpty } from "../components/admin-ui";
 import { useTableUrlState } from "../lib/use-table-url-state";
 import { AdminUserDetailDrawer } from "../components/admin-user-detail-drawer";
@@ -19,6 +20,7 @@ const allColumnKeys = userColumnOptions.map((item) => item.key);
 
 export default function UsersPanel({ onUserChanged }: { onUserChanged?: (user: LocalUser) => void }) {
     const actor = useUserStore((state) => state.user);
+    const { references } = useAdminContext();
     const { message, modal } = App.useApp();
     const { state, update } = useTableUrlState();
     const debouncedFilter = useDebouncedValue(state.filter);
@@ -237,7 +239,16 @@ export default function UsersPanel({ onUserChanged }: { onUserChanged?: (user: L
 
             <AdminUserDetailDrawer userId={detailUserId} previousUserId={previousUserId} nextUserId={nextUserId} onNavigate={setDetailUserId} onClose={() => setDetailUserId(null)} />
             <AdminUserCreateDrawer open={createUserOpen} onClose={() => setCreateUserOpen(false)} onCreated={addUser} />
-            <AdminUserEditDrawer user={editingUser} actorId={actor?.id} onClose={() => setEditingUser(null)} onSaved={replaceUser} />
+            <AdminUserEditDrawer
+                user={editingUser}
+                actorId={actor?.id}
+                discountGroups={references.discountGroups}
+                onClose={() => setEditingUser(null)}
+                onSaved={(user) => {
+                    const discountGroupName = references.discountGroups.find((group) => group.id === user.discountGroupId)?.name;
+                    replaceUser({ ...user, discountGroupName });
+                }}
+            />
         </>
     );
 }

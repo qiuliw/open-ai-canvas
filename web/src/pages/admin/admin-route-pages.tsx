@@ -76,16 +76,16 @@ export function BannerAnnouncementsPage() {
 }
 
 export function CreditOperationsPage() {
-    const { references } = useAdminContext();
+    const { references, reloadReferences } = useAdminContext();
     const [activeOperation, setActiveOperation] = useState<"policy" | "adjustment" | null>(null);
     return (
         <AdminPageFrame
             title="积分运营"
-            description="异常计费核对、积分策略与人工调账"
+            description="异常计费核对、折扣策略与人工调账"
             actions={
                 <>
                     <Button icon={<Settings2 className="size-4" />} onClick={() => setActiveOperation("policy")}>
-                        积分策略
+                        折扣策略
                     </Button>
                     <Button type="primary" icon={<UserRoundCog className="size-4" />} onClick={() => setActiveOperation("adjustment")}>
                         人工调账
@@ -93,7 +93,7 @@ export function CreditOperationsPage() {
                 </>
             }
         >
-            <CreditOperationsPanel users={references.users} activeOperation={activeOperation} onOperationChange={setActiveOperation} />
+            <CreditOperationsPanel users={references.users} activeOperation={activeOperation} onOperationChange={setActiveOperation} onGroupsChanged={() => void reloadReferences()} />
         </AdminPageFrame>
     );
 }

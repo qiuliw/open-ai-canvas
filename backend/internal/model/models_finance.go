@@ -97,6 +97,20 @@ type RedeemBatch struct {
 	ExpiredCount       int64      `json:"expiredCount" gorm:"->;-:migration"`
 }
 
+// DiscountGroup 是管理员配置的用户折扣分组；倍率口径与全局积分策略相同（万分比）。
+type DiscountGroup struct {
+	ID                             string           `json:"id" gorm:"primaryKey;size:36"`
+	Name                           string           `json:"name" gorm:"size:80;uniqueIndex"`
+	Description                    string           `json:"description" gorm:"size:500"`
+	DefaultMultiplierBPS           int64            `json:"defaultMultiplierBasisPoints"`
+	ModelMultiplierBasisPointsJSON string           `json:"-" gorm:"column:model_multiplier_basis_points;type:text"`
+	ModelMultiplierBPS             map[string]int64 `json:"modelMultiplierBasisPoints" gorm:"-"`
+	Enabled                        bool             `json:"enabled" gorm:"index;not null;default:true"`
+	CreatedAt                      time.Time        `json:"createdAt" gorm:"index"`
+	UpdatedAt                      time.Time        `json:"updatedAt"`
+	MemberCount                    int64            `json:"memberCount" gorm:"->;-:migration"`
+}
+
 type RedeemCode struct {
 	ID                 string           `json:"id" gorm:"primaryKey;size:36"`
 	BatchID            string           `json:"batchId" gorm:"index;size:36;index:idx_redeem_codes_batch_status,priority:1;index:idx_redeem_codes_batch_created,priority:1"`

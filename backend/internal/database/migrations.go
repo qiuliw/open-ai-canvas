@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 47
+const CurrentSchemaVersion int64 = 48
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -29,6 +29,7 @@ const prefixedIDSequenceReconcileChecksum = "sha256:prefixed-id-sequence-reconci
 const skillLibraryCategoriesChecksum = "sha256:skill-library-categories-v39-20260926"
 const builtinSkillTombstonesChecksum = "sha256:builtin-skill-tombstones-v40-20260927"
 const resourceThumbnailChecksum = "sha256:resource-thumbnail-v41-20260927"
+const discountGroupsChecksum = "sha256:discount-groups-v48-20261008"
 
 const postgresSchemaMigrationLockID int64 = 73123910420260830
 
@@ -151,6 +152,7 @@ var schemaMigrations = []migration{
 	}},
 	{version: 46, name: "skill_curation", checksum: "sha256:skill-curation-v46-20261005", apply: migrateSkillCuration},
 	{version: 47, name: "skill_curation_roots", checksum: "sha256:skill-curation-roots-v47-20261005", apply: migrateSkillCurationRoots},
+	{version: 48, name: "discount_groups", checksum: discountGroupsChecksum, apply: migrateSchemaV48},
 }
 
 func migratePrefixedIDSequenceReconcile(tx *gorm.DB) error {

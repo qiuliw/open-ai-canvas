@@ -4,9 +4,21 @@ import { useEffect, useState } from "react";
 
 import { createAdminUser, updateAdminUser, type AdminUser, type LocalUser } from "@/services/api/auth";
 
-type UserFormValues = Pick<LocalUser, "displayName" | "email" | "role" | "status"> & { password?: string };
+type UserFormValues = Pick<LocalUser, "displayName" | "email" | "role" | "status"> & { password?: string; discountGroupId?: string };
 
-export function AdminUserEditDrawer({ user, actorId, onClose, onSaved }: { user: AdminUser | null; actorId?: string; onClose: () => void; onSaved: (user: LocalUser) => void }) {
+export function AdminUserEditDrawer({
+    user,
+    actorId,
+    discountGroups = [],
+    onClose,
+    onSaved,
+}: {
+    user: AdminUser | null;
+    actorId?: string;
+    discountGroups?: Array<{ id: string; name: string; enabled: boolean }>;
+    onClose: () => void;
+    onSaved: (user: LocalUser) => void;
+}) {
     const { message, modal } = App.useApp();
     const [saving, setSaving] = useState(false);
     const [form] = Form.useForm<UserFormValues>();
@@ -20,6 +32,7 @@ export function AdminUserEditDrawer({ user, actorId, onClose, onSaved }: { user:
             email: user.email || "",
             role: user.role,
             status: user.status,
+            discountGroupId: user.discountGroupId || "",
         });
     }, [form, user]);
 
@@ -31,7 +44,7 @@ export function AdminUserEditDrawer({ user, actorId, onClose, onSaved }: { user:
         }
         modal.confirm({
             title: "放弃用户修改？",
-            content: "尚未保存的账号、角色或状态修改将丢失。",
+            content: "尚未保存的账号、角色、状态或折扣分组修改将丢失。",
             okText: "放弃修改",
             cancelText: "继续编辑",
             okButtonProps: { danger: true },
@@ -50,6 +63,7 @@ export function AdminUserEditDrawer({ user, actorId, onClose, onSaved }: { user:
                 role: values.role,
                 status: values.status,
                 ...(values.password?.trim() ? { password: values.password } : {}),
+                discountGroupId: values.discountGroupId || "",
             });
             onSaved(result.user);
             form.resetFields();
@@ -105,6 +119,16 @@ export function AdminUserEditDrawer({ user, actorId, onClose, onSaved }: { user:
                             { label: "已启用", value: "active" },
                             { label: "已停用", value: "disabled" },
                         ]}
+                    />
+                </Form.Item>
+                <Form.Item name="discountGroupId" label="倍率分组（叠加上方策略）">
+                    <Select
+                        allowClear
+                        placeholder="不使用"
+                        options={discountGroups.map((group) => ({
+                            label: group.enabled ? group.name : `${group.name}（已停用）`,
+                            value: group.id,
+                        }))}
                     />
                 </Form.Item>
             </Form>

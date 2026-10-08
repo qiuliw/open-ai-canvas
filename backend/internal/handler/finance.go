@@ -162,6 +162,72 @@ func RegisterFinanceRoutes(r *gin.RouterGroup, svc *service.Service) {
 		}
 		ok(c, gin.H{"policy": policy})
 	})
+	r.GET("/admin/discount-groups", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		page, limit, err := parsePaginationQuery(c, 20)
+		if err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		items, err := svc.AdminDiscountGroupPage(user, service.AdminListQuery{Keyword: c.Query("keyword"), Status: c.Query("status"), Page: page, Limit: limit})
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, items)
+	})
+	r.POST("/admin/discount-groups", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		var req service.DiscountGroupRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		group, err := svc.AdminCreateDiscountGroup(user, req)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"group": group})
+	})
+	r.PATCH("/admin/discount-groups/:id", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		var req service.DiscountGroupRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		group, err := svc.AdminUpdateDiscountGroup(user, c.Param("id"), req)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"group": group})
+	})
+	r.DELETE("/admin/discount-groups/:id", func(c *gin.Context) {
+		user, err := currentUser(c, svc)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		if err := svc.AdminDeleteDiscountGroup(user, c.Param("id")); err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"ok": true})
+	})
 	r.GET("/admin/settings/email", func(c *gin.Context) {
 		user, err := currentUser(c, svc)
 		if err != nil {
