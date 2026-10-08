@@ -206,11 +206,19 @@ func retryableProtocolMediaDownload(err error) bool {
 	return false
 }
 
-func protocolResultError(message, taskID string) error {
+func protocolResultError(message, taskID string, rawBodies ...[]byte) error {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = "上游返回失败状态"
 	}
+	raw := message
+	for _, body := range rawBodies {
+		if text := strings.TrimSpace(string(body)); text != "" {
+			raw = text
+			break
+		}
+	}
+	message = providerErrorWithDetail(message, raw)
 	if taskID == "" {
 		return errors.New(message)
 	}
