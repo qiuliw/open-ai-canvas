@@ -3069,3 +3069,10 @@ SQLite 与 HTTP recorder 已验证；PostgreSQL 16／17、前端构建及浏览�
 - [x] 专项测试覆盖新增/删除可选字段的真实 JSON 序列化、旧空补丁恢复、有效请求不变、缺少原快照不猜测以及无效变化不发送。
 - [x] 用户确认原先 Agent 发消息前“节点补丁缺少字段基线”的场景恢复正常。
 - [ ] 在多标签页同时修改字段并重试旧队列，确认服务端仍拒绝同字段冲突；本次未修改服务端并发校验。
+
+## 百炼 MiniMax 视频插件
+
+- 已实现：新增 `dashscope-minimax-video` 声明式协议插件，适配百炼 MaaS 托管的 MiniMax/MiniMax-H3 视频生成：创建 `POST /api/v1/services/aigc/video-generation/video-synthesis` + `X-DashScope-Async: enable`，轮询 `GET /api/v1/tasks/{taskId}`；媒体按 role 映射 `first_frame/last_frame/image_url/feature/driving_audio`，resolution 默认 `768P`，首尾帧模式强制 `ratio=adaptive`，其余默认 `16:9`；校验模型白名单、时长 4-15 秒、首尾帧各最多 1 张与图生视频/多模态参考互斥。默认 Base URL 使用 `{WorkspaceId}` 占位（北京地域业务空间域名），部署时在渠道配置真实域名。与 MiniMax 官方 `/v2/video_generation` 协议插件 `minimax-hailuo-video-v2` 不兼容，按渠道选择。
+- 自动验证：`go test ./internal/protocol/ -run 'TestDashscopeMinimaxVideo|TestOfficialProtocolPackages'` 通过；插件包经生成脚本产出并通过官方目录自包含不变量校验。
+- [ ] 使用真实百炼 MaaS 渠道密钥分别验证文生视频、首尾帧图生视频与多模态参考生视频的任务创建、轮询与成片下载持久化。
+- [ ] 确认管理后台渠道对该 MaaS 工作空间域名的模型拉取/发现表现，以及 `{WorkspaceId}` 占位 Base URL 在配置界面的填写引导是否足够。

@@ -1007,6 +1007,55 @@ add({
   })
 });
 
+// 百炼 MaaS MiniMax 的 media.type 与统一 role 不同名：仅首尾帧沿用 role，其余按 kind 映射。
+const minimaxBailianMediaType = conditional(
+  eq(ref("media.role"), "first_frame"), "first_frame", conditional(
+    eq(ref("media.role"), "last_frame"), "last_frame", conditional(
+      eq(ref("media.kind"), "image"), "image_url", conditional(
+        eq(ref("media.kind"), "video"), "feature", conditional(
+          eq(ref("media.kind"), "audio"), "driving_audio", ref("media.kind")
+        )
+      )
+    )
+  )
+);
+
+add({
+  id: "dashscope-minimax-video", providerId: "dashscope-minimax-video", name: "DashScope MiniMax Video", vendor: "Alibaba Cloud", capability: "video",
+  baseUrl: "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com", auth: bearer, params: videoParams, requiresPublicMediaUrls: true,
+  notes: "百炼 MaaS 托管的 MiniMax 视频协议（MiniMax/MiniMax-H3）。默认 Base URL 中的 {WorkspaceId} 为北京地域业务空间占位，部署时在渠道配置真实工作空间域名。resolution 仅支持 768P、2K；文生视频 ratio 必填且不能为 adaptive，首尾帧图生视频恒为 adaptive；图生视频（首尾帧）与多模态参考生视频（参考图/参考视频/驱动音频）互斥。与 MiniMax 官方 /v2/video_generation 线协议（minimax-hailuo-video-v2）不兼容，不能按模型名混用。",
+  validations: [
+    { assert: { $in: [lower(ref("request.model")), ["minimax/minimax-h3"]] }, message: "百炼 MiniMax Video 仅支持 MiniMax/MiniMax-H3" },
+    { assert: { $lte: [len(mediaWithRoles("request.images", ["first_frame"])), 1] }, message: "百炼 MiniMax Video 最多只能有一个 first_frame" },
+    { assert: { $lte: [len(mediaWithRoles("request.images", ["last_frame"])), 1] }, message: "百炼 MiniMax Video 最多只能有一个 last_frame" },
+    { assert: { $and: [gte(ref("request.duration"), 4), lte(ref("request.duration"), 15)] }, message: "百炼 MiniMax Video duration 必须在 4-15 秒之间" },
+    { assert: { $not: { $and: [
+      { $gt: [len(mediaWithRoles("request.images", ["first_frame", "last_frame"])), 0] },
+      { $gt: [addNumbers(len(mediaWithRoles("request.images", ["reference_image", "subject_reference", "style_reference"])), len(ref("request.videos")), len(ref("request.audios"))), 0] }
+    ] } }, message: "百炼 MiniMax Video 首尾帧图生视频不能与参考图、参考视频或驱动音频混用" }
+  ],
+  create: jsonCreate("/api/v1/services/aigc/video-generation/video-synthesis", {
+    model: ref("request.model"),
+    input: {
+      prompt: ref("request.prompt"),
+      media: omit(map(sorted(ref("request.inputs")), "media", { type: minimaxBailianMediaType, url: ref("media.value") }))
+    },
+    parameters: {
+      resolution: coalesce(ref("request.resolution"), "768P"),
+      ratio: conditional(gt(len(mediaWithRoles("request.images", ["first_frame", "last_frame"])), 0), "adaptive", coalesce(ref("request.aspectRatio"), "16:9")),
+      duration: ref("request.duration"),
+      watermark: ref("request.watermark")
+    }
+  }, { headers: { "X-DashScope-Async": "enable" }, originPath: true }),
+  poll: { method: "GET", path: "/api/v1/tasks/{{taskId}}", originPath: true },
+  response: asyncResponse("video", {
+    taskId: coalesce(ref("response.output.task_id"), ref("response.task_id"), ref("taskId")),
+    status: conditional(eq(lower(ref("response.output.task_status")), "unknown"), "failed", coalesce(ref("response.output.task_status"), ref("response.status"), "pending")),
+    videos: ref("response.output.video_url"),
+    usage: ref("response.usage"), errorPaths: ["code", "output.code"], messagePaths: ["message", "output.message"]
+  })
+});
+
 add({
   id: "dashscope-wan-video", providerId: "dashscope-wan-video", name: "DashScope Wan Video", vendor: "Alibaba Cloud", capability: "video",
   baseUrl: "https://dashscope.aliyuncs.com", auth: bearer, params: videoParams, requiresPublicMediaUrls: true,
