@@ -298,6 +298,7 @@ export function updateAdminDiscountGroup(id: string, input: DiscountGroupInput) 
 
 export function deleteAdminDiscountGroup(id: string) {
     return http.delete<{ ok: boolean }>(`/admin/discount-groups/${encodeURIComponent(id)}`);
+}
 
 export type BillingAutoRefundSetting = { enabled: boolean; updatedAt?: string };
 
