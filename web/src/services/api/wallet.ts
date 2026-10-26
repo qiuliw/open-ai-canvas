@@ -298,6 +298,15 @@ export function updateAdminDiscountGroup(id: string, input: DiscountGroupInput) 
 
 export function deleteAdminDiscountGroup(id: string) {
     return http.delete<{ ok: boolean }>(`/admin/discount-groups/${encodeURIComponent(id)}`);
+
+export type BillingAutoRefundSetting = { enabled: boolean; updatedAt?: string };
+
+export function getAdminBillingAutoRefund() {
+    return http.get<{ setting: BillingAutoRefundSetting }>("/admin/settings/billing-auto-refund");
+}
+
+export function updateAdminBillingAutoRefund(enabled: boolean) {
+    return http.patch<{ setting: BillingAutoRefundSetting }>("/admin/settings/billing-auto-refund", { enabled });
 }
 
 export function getAdminLinuxDOSetting() {

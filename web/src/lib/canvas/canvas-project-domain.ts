@@ -6,7 +6,8 @@ import { bindingForConnectedNode, storyboardComposerContent, storyboardRowRefere
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
-import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { imageNodeSizeFromRatio, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { batchCellAnchor, type BatchScroll } from "@/lib/canvas/canvas-batch-references";
 import { canvasNodeMentionToken, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { batchReferenceHandleY } from "@/lib/canvas/canvas-batch-table";
@@ -118,6 +119,13 @@ export function storyboardRowsOutputContract(requirement: string) {
         "  mustHave（数组，最多 3 项）、optionalDetails（数组）。",
         "- 镜头数量以完整覆盖剧情因果、人物关系和关键台词为准，不要为压缩数量删减关键情节。",
     ].join("\n");
+}
+
+// 旧版本会把项目画风执行规范追加到分镜剧情末尾；分镜规划只保留用户原始剧情。
+export function stripProjectStyleExecutionBlocks(prompt: string): string {
+    const marker = "【项目画风执行规范】";
+    const markerIndex = prompt.indexOf(marker);
+    return (markerIndex >= 0 ? prompt.slice(0, markerIndex) : prompt).trim();
 }
 
 // 分镜文本任务实际发出的 prompt：技能上下文只描述工作流、不约束输出结构，画布节点和章节分镜又都没有
@@ -251,7 +259,8 @@ export function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<Canvas
     const nextPatch = resetGenerationParamsOnModelSwitch(node, safePatch);
     const next = synchronizeGenerationSpec(node, nextPatch);
     const spec = node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
-    const size = typeof safePatch.size === "string" && !node.metadata?.content ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
+    const size = typeof safePatch.size === "string" && !node.metadata?.content && !node.metadata?.manualSize
+        ? node.type === CanvasNodeType.Image ? imageNodeSizeFromRatio(safePatch.size) : nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
     return size && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
 }
 
@@ -272,7 +281,9 @@ function resetGenerationParamsOnModelSwitch(node: CanvasNodeData, patch: Partial
  * 连线落到目标节点上的吸附点。单端口一侧取边的正中——与 connectionHandleY 保持同一个
  * 口径，否则吸附点和实际画出来的线会对不上（这两处是同一规则的两份实现，改一处必错）。
  */
-export function getConnectionTargetAnchor(node: CanvasNodeData, current: ConnectionHandle, handleId?: string, scrollTop = 0) {
+export function getConnectionTargetAnchor(node: CanvasNodeData, current: ConnectionHandle, handleId?: string, scrollTop = 0, batchScroll?: BatchScroll) {
+    const cell = current.handleType === "source" ? batchCellAnchor(node, handleId, batchScroll) : undefined;
+    if (cell) return { x: cell.x, y: cell.y };
     return {
         x: current.handleType === "source" ? node.position.x : node.position.x + node.width,
         y: batchReferenceHandleY(node, handleId) ?? storyboardHandleY(node, handleId, scrollTop) ?? node.position.y + node.height / 2,
@@ -468,6 +479,7 @@ export function sameNodeSemanticData(left: CanvasNodeData, right: CanvasNodeData
 }
 
 export function applyBatchPrimaryImage(root: CanvasNodeData, primary: CanvasNodeData): CanvasNodeData {
+    if (root.metadata?.imageLayerGroup || root.metadata?.experimentalLayerPlan) return root;
     // 主图是根节点对媒体的完整代理；可选字段也必须显式覆盖，避免残留上一张图的存储身份。
     return {
         ...root,
@@ -496,10 +508,22 @@ export function removeCanvasNodes(nodes: CanvasNodeData[], requestedIds: Set<str
     const removedIds = new Set(requestedIds);
     nodes.forEach((node) => {
         if (requestedIds.has(node.id)) node.metadata?.batchChildIds?.forEach((childId) => removedIds.add(childId));
+        if (requestedIds.has(node.id)) node.metadata?.experimentalLayerPlan?.requests.forEach((request) => removedIds.add(request.nodeId));
     });
     const remainingNodes = nodes.filter((node) => !removedIds.has(node.id));
     const cleanedNodes = remainingNodes.map((node) => {
-        const detached = node.parentId && removedIds.has(node.parentId) ? { ...node, parentId: undefined } : node;
+        let detached = node.parentId && removedIds.has(node.parentId) ? { ...node, parentId: undefined } : node;
+        const batchTable = detached.metadata?.batchTable;
+        if (batchTable) {
+            const rows = batchTable.rows.map(row => {
+                const inputNodeIds = row.inputNodeIds.map(id => removedIds.has(id) ? "" : id);
+                const textNodeIds = row.textNodeIds?.map(id => removedIds.has(id) ? "" : id);
+                const outputNodeId = row.outputNodeId && removedIds.has(row.outputNodeId) ? undefined : row.outputNodeId;
+                const changed = inputNodeIds.some((id, i) => id !== row.inputNodeIds[i]) || textNodeIds?.some((id, i) => id !== row.textNodeIds?.[i]);
+                return changed || outputNodeId !== row.outputNodeId ? { ...row, inputNodeIds, textNodeIds, outputNodeId, inputChanged: Boolean(outputNodeId) || row.inputChanged } : row;
+            });
+            if (rows.some((row, i) => row !== batchTable.rows[i])) detached = { ...detached, metadata: { ...detached.metadata, batchTable: { ...batchTable, rows } } };
+        }
         const storyboard = detached.metadata?.storyboard;
         const cleaned = storyboard
             ? {
@@ -523,7 +547,18 @@ export function removeCanvasNodes(nodes: CanvasNodeData[], requestedIds: Set<str
         if (!cleaned.metadata?.isBatchRoot || childIds?.length === cleaned.metadata.batchChildIds?.length) return cleaned;
         const primaryImageId = childIds?.includes(cleaned.metadata.primaryImageId || "") ? cleaned.metadata.primaryImageId : childIds?.[0];
         const primaryNode = remainingNodes.find((item) => item.id === primaryImageId);
-        const batchRoot = { ...cleaned, metadata: { ...cleaned.metadata, batchChildIds: childIds, primaryImageId } };
+        const plan = cleaned.metadata.experimentalLayerPlan;
+        const requests = plan?.requests.filter((request) => !removedIds.has(request.nodeId));
+        const batchRoot = { ...cleaned, metadata: { ...cleaned.metadata, batchChildIds: childIds, primaryImageId, ...(plan ? { experimentalLayerPlan: requests?.length ? { ...plan, requests, composedSignature: undefined, errorSignature: undefined } : undefined } : {}) } };
+        if (cleaned.metadata.imageLayerGroup)
+            return {
+                ...batchRoot,
+                metadata: {
+                    ...batchRoot.metadata,
+                    primaryImageId: undefined,
+                    imageLayerGroup: { ...cleaned.metadata.imageLayerGroup, compositeStatus: "updating" as const, layers: cleaned.metadata.imageLayerGroup.layers.filter((layer) => !removedIds.has(layer.nodeId)) },
+                },
+            };
         return primaryNode ? applyBatchPrimaryImage(batchRoot, primaryNode) : batchRoot;
     });
     const nextNodes = cleanedNodes.map((node) => reconcileImageBatchRoot(node, cleanedNodes));

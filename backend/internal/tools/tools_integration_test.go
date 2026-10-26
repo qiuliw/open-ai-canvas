@@ -1,13 +1,13 @@
 package tools_test
 
 import (
+	"path/filepath"
+	"strings"
+	"testing"
 	"yingce/backend/internal/database"
 	"yingce/backend/internal/model"
 	"yingce/backend/internal/repository"
 	"yingce/backend/internal/tools"
-	"path/filepath"
-	"strings"
-	"testing"
 )
 
 func TestToolsVisibilityTokensSeedAndReferences(t *testing.T) {

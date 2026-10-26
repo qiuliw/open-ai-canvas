@@ -63,15 +63,21 @@ export function delay(ms: number, signal?: AbortSignal) {
             else resolve();
         };
         const cancel = () => finish(true);
-        if (signal?.aborted) { cancel(); return; }
+        if (signal?.aborted) {
+            cancel();
+            return;
+        }
         signal?.addEventListener("abort", cancel, { once: true });
         timer = setTimeout(() => finish(false), ms);
     });
 }
 
 export async function blobToDataUrl(blob: Blob) {
-    try { return await readFileAsDataUrl(blob); }
-    catch { throw new Error("读取本地素材失败"); }
+    try {
+        return await readFileAsDataUrl(blob);
+    } catch {
+        throw new Error("读取本地素材失败");
+    }
 }
 
 export async function videoResultFromUrl(url: string, options?: RequestOptions): Promise<VideoGenerationResult> {

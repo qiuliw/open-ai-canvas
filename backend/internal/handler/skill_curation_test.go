@@ -4,15 +4,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"yingce/backend/internal/auth"
-	"yingce/backend/internal/model"
-	"yingce/backend/internal/repository"
-	"yingce/backend/internal/service"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+	"yingce/backend/internal/auth"
+	"yingce/backend/internal/model"
+	"yingce/backend/internal/repository"
+	"yingce/backend/internal/service"
 )
 
 func TestSkillCurationHTTP(t *testing.T) {

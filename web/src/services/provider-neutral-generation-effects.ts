@@ -1,3 +1,4 @@
+import { createClientUUID } from "@/lib/client-id";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
 import { getActiveUserScope } from "@/lib/user-scope";
 import type { GenerationTaskEffectClaim, GenerationTaskEffectResult, GenerationTaskEffectStore } from "@/services/generation-task-materializer";
@@ -50,11 +51,11 @@ function effectStorage(scope: string): EffectStorage {
 }
 
 function effectLock(): AsyncLock {
-    if (typeof window !== "undefined") {
-        const locks = navigator.locks;
-        if (!locks) throw new Error("当前浏览器不支持跨页面生成副作用互斥");
-        return locks;
-    }
+    // if (typeof window !== "undefined") {
+    //     const locks = navigator.locks;
+    //     if (!locks) throw new Error("当前浏览器不支持跨页面生成副作用互斥");
+    //     return locks;
+    // }
     return {
         async request<T>(name: string, callback: () => Promise<T>) {
             const prior = inProcessLockTails.get(name) ?? Promise.resolve();
@@ -181,7 +182,7 @@ export function createProviderNeutralGenerationTaskEffectStore(
                     scope,
                     taskId,
                     effectKey,
-                    leaseToken: crypto.randomUUID(),
+                    leaseToken: createClientUUID(),
                     expiresAt: new Date(current.getTime() + leaseMs).toISOString(),
                     fence: (record?.fence ?? 0) + 1,
                 };

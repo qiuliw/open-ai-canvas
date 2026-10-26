@@ -3,10 +3,10 @@ package auth
 import (
 	"crypto/hmac"
 	"errors"
-	"yingce/backend/internal/kernel"
 	"log"
 	"strings"
 	"time"
+	"yingce/backend/internal/kernel"
 
 	"yingce/backend/internal/model"
 	"yingce/backend/internal/repository"
@@ -80,7 +80,6 @@ func (s *Service) SendPasswordResetEmailCode(rawEmail string) error {
 		if cleanupErr := s.repo.DeleteEmailVerificationCode(record.ID); cleanupErr != nil {
 			log.Printf("password reset email cleanup failed: recipient=%s error=%v", maskedEmail(email), cleanupErr)
 		}
-		log.Printf("password reset email delivery failed: recipient=%s error=%v", maskedEmail(email), err)
 		return nil
 	}
 	if cleanupErr := s.repo.DeleteExpiredEmailVerificationCodes(now.Add(-24 * time.Hour)); cleanupErr != nil {

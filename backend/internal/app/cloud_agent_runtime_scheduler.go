@@ -33,6 +33,10 @@ func (s *Service) cloudAgentExecutionOutput(task *model.Task, initial cloudAgent
 		state = cloudAgentRuntime{Request: initial.Request, ParentID: initial.ParentID, CreativeAnchor: initial.CreativeAnchor, Skills: initial.Skills, Profile: initial.Profile, TaskIDs: []string{task.ID}, Events: []CloudAgentEvent{}}
 	}
 	out := agentRunOutput(task, initial)
+	out.ConversationID = run.ConversationID
+	if out.ConversationID == "" {
+		out.ConversationID = run.ID
+	}
 	out.Status = run.Status
 	out.Revision, out.CleanupPending, out.FailureMessage = run.Revision, run.CleanupPending, run.FailureMessage
 	out.UpdatedAt = run.UpdatedAt
@@ -42,7 +46,7 @@ func (s *Service) cloudAgentExecutionOutput(task *model.Task, initial cloudAgent
 	}
 	// 事件已全量落库，运行详情只返回一页：默认是尾部窗口，sinceSeq 只取增量。
 	// 四个位置字段与 events 一起返回，客户端据此判断"是否还有更早的记录"。
-	out.Events = s.cloudAgentRunEventsForView(task.UserID, run, &state, view.SinceSeq, view.EventLimit)
+	out.Events = s.cloudAgentRunEventsForView(task.UserID, run, &state, view.SinceSeq, view.EventLimit, view.FromStart)
 	// EventSeqBase 必须与真正返回的这一页对齐（eventLimit 把它收窄时也一样），
 	// 不变量 events[i].seq == eventSeqBase + i + 1 才成立。页为空时退回窗口水位：
 	// 那时没有"首条事件"，但仍然要能说明窗口在整条日志里的位置。
@@ -54,7 +58,7 @@ func (s *Service) cloudAgentExecutionOutput(task *model.Task, initial cloudAgent
 	if len(out.Events) > 0 {
 		out.LatestSeq = out.Events[len(out.Events)-1].Seq
 	}
-	if view.SinceSeq == 0 && len(out.Events) < out.EventCount {
+	if !view.FromStart && view.SinceSeq == 0 && len(out.Events) < out.EventCount {
 		out.EventsTruncated = true
 	}
 	out.Approval = state.Approval
@@ -321,6 +325,9 @@ func (s *Service) advanceCloudAgent(run *model.CloudAgentExecution) (err error) 
 			if len(calls) > 0 {
 				state.Canonical.Messages = append(state.Canonical.Messages, map[string]any{"role": "assistant", "content": result.Text, "tool_calls": calls})
 			}
+			if strings.TrimSpace(result.Text) != "" {
+				cloudAgentConsumeInspectedImages(&state.Canonical)
+			}
 			if len(calls) == 0 {
 				if len(state.PendingInterjections) > 0 {
 					if !cloudAgentStepBudgetExhausted(&state) {
@@ -334,6 +341,9 @@ func (s *Service) advanceCloudAgent(run *model.CloudAgentExecution) (err error) 
 						state.Canonical.Messages = append(state.Canonical.Messages, cloudAgentPlanNudgeMessage(&state, pending[0]))
 						return cloudAgentSave(current, &state)
 					}
+				}
+				if err := cloudAgentCommitLessonDrafts(repo, run.UserID, run.ID, &state); err != nil {
+					return err
 				}
 				current.Status = "completed"
 			}
@@ -364,6 +374,7 @@ func (s *Service) advanceCloudAgent(run *model.CloudAgentExecution) (err error) 
 		return s.failCloudAgent(run, &state, fmt.Sprintf("达到 %d 次模型调用上限，本轮已停止", stepLimit))
 	}
 	cloudAgentDrainInterjections(run.ID, &state)
+	softReadGuard := state.ReadLoopNudge
 	// 轮内唯一裁剪 = 图片：超出保留轮次的看图结果换成文字回执（正文一律保留）。
 	// 它必须在压缩判定之前跑：图片是最贵的一类内容，先移出再评估 token 压力才有意义。
 	if changed, pruned := cloudAgentPruneInspectedImages(&state.Canonical, nil); changed {
@@ -387,7 +398,6 @@ func (s *Service) advanceCloudAgent(run *model.CloudAgentExecution) (err error) 
 		}
 		return contextErr
 	}
-	s.attachCloudAgentLessons(&canonical, run.UserID, cloudAgentLessonTaskText(&state))
 	references, refErr := s.cloudAgentImageReferences(run.UserID, state.Request, &canonical)
 	if refErr != nil {
 		return s.failCloudAgent(run, &state, cloudAgentSafeToolError(refErr))
@@ -414,6 +424,13 @@ func (s *Service) advanceCloudAgent(run *model.CloudAgentExecution) (err error) 
 	}
 	if tokens > contextBudget.InputBudgetTokens {
 		return s.failCloudAgent(run, &state, cloudAgentContextBudgetMessage(contextBudget))
+	}
+	if softReadGuard {
+		// 只对紧接着的一次模型请求暂时收起只读工具。运行仍保持 running，
+		// 下一步模型可以回复、提问或执行有实际变化的写操作。
+		state.ReadLoopNudge = false
+		state.ReadLoopToolName = ""
+		state.ReadLoopCount = 0
 	}
 	req := CreateTaskRequest{ProjectID: state.Request.CanvasID, Type: "canvas_text", Operation: "cloud_agent_step", Prompt: state.Request.Prompt, Model: state.Request.Model, LogicalModelID: state.Request.LogicalModelID, Input: input}
 	return s.enqueueCloudAgentTask(run, &state, req, nil)
@@ -568,6 +585,7 @@ func (s *Service) failCloudAgent(run *model.CloudAgentExecution, state *cloudAge
 	return s.repo.MutateCloudAgent(run.UserID, run.ID, run.Revision, func(current *model.CloudAgentExecution, _ *repository.Repository) error {
 		current.Status = "failed"
 		current.FailureMessage = truncateRunes(message, 1000)
+		state.PendingLessonDrafts = nil
 		cloudAgentDropInterjections(run.ID, "本轮已结束："+truncateRunes(message, 120), state)
 		state.event(run.ID, "run_failed", map[string]any{"text": message})
 		return cloudAgentSave(current, state)
@@ -582,6 +600,7 @@ func failCloudAgentAdmission(current *model.CloudAgentExecution, state *cloudAge
 	current.Status = "failed"
 	current.FailureMessage = message
 	state.Approval = nil
+	state.PendingLessonDrafts = nil
 	state.event(runID, "run_failed", map[string]any{
 		"text":   message,
 		"reason": "tool_admission_failed",

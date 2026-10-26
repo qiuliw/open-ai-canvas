@@ -3,9 +3,9 @@ package prompts
 import (
 	"encoding/json"
 	"errors"
-	"yingce/backend/internal/kernel"
 	"strings"
 	"time"
+	"yingce/backend/internal/kernel"
 
 	"yingce/backend/internal/model"
 )

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AlertCircle, BookOpenCheck, CheckCircle2, ChevronRight, Clapperboard, Copy, Download, Image as ImageIcon, Lock, Maximize2, Music2, Pencil, RefreshCw, ScanSearch, Settings2, Star, Trash2, Type, UserRound, Video, WandSparkles } from "lucide-react";
 
 import { useCanvasNodeActions } from "./canvas-node-action-context";
+import { CanvasImageLayerControls } from "./canvas-image-layer-controls";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { CanvasNodeRenderLOD } from "@/lib/canvas/canvas-node-lod";
@@ -16,6 +17,8 @@ import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import type { NodeResizeCorner } from "@/lib/canvas/node-resize-geometry";
 import { useCanvasNodeResize } from "./use-canvas-node-resize";
+import { useCanvasConnectionTilt } from "./use-canvas-connection-tilt";
+import { useCanvasNodeResizeStyle } from "./canvas-node-resize-motion";
 import { CanvasNodeContent, CanvasNodeImageInfo, CanvasNodeProducedModel } from "./canvas-node-content";
 
 type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
@@ -30,10 +33,11 @@ type CanvasNodeProps = {
     isRelated: boolean;
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
+    isConnecting?: boolean;
     connectionApproach?: Position;
-    forceInputVisible?: boolean;
+    forceInputMounted?: boolean;
     showImageInfo: boolean;
-    reduceMediaEffects?: boolean;
+    disableMediaEffects?: boolean;
     readOnly?: boolean;
     resourceLabel?: CanvasResourceReference;
     mentionReferences?: CanvasResourceReference[];
@@ -59,7 +63,6 @@ type CanvasNodeProps = {
     onRetry?: (node: CanvasNodeData) => void;
     onReloadResource?: (node: CanvasNodeData) => void;
     onOpenTaskDetails?: (node: CanvasNodeData) => void;
-    onOpenVersions?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onReplaceMedia?: (node: CanvasNodeData) => void;
     onOpenTextEditor?: (node: CanvasNodeData) => void;
@@ -79,10 +82,11 @@ export const CanvasNode = React.memo(function CanvasNode({
     isRelated,
     isFocusRelated,
     isConnectionTarget,
+    isConnecting = false,
     connectionApproach,
-    forceInputVisible = false,
+    forceInputMounted = false,
     showImageInfo,
-    reduceMediaEffects = false,
+    disableMediaEffects = false,
     readOnly = false,
     resourceLabel,
     mentionReferences = [],
@@ -108,7 +112,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     onRetry,
     onReloadResource,
     onOpenTaskDetails,
-    onOpenVersions,
     onViewImage,
     onOpenTextEditor,
     onOpenPrevis,
@@ -130,10 +133,11 @@ export const CanvasNode = React.memo(function CanvasNode({
     const hasMediaContent = hasImageContent || hasVideoContent || hasAudioContent;
     const producedModelStored = data.metadata?.producedModel;
     const showProducedModel = showImageInfo && hasMediaContent && Boolean(producedModelStored);
-    const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
+    const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && (batchCount > 1 || Boolean(data.metadata?.imageLayerGroup));
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
     const showStatusTrack = Boolean(resourceLabel || data.metadata?.locked || isBatchRoot || (isBatchChild && !readOnly) || (hasMediaContent && !readOnly));
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
+    const showConnectionRails = !isConnecting && (hovered || isSelected || isFocusRelated);
     const effectiveRenderLOD: CanvasNodeRenderLOD = renderLOD === "full" || hovered || isEditingContent || isEditingTitle || mediaActive ? "full" : renderLOD;
     const showChrome = effectiveRenderLOD === "full";
     const nodeState = isFocusRelated ? "focus" : isConnectionTarget ? "target" : isSelected ? "selected" : isRelated && !isBatchChild ? "related" : "idle";
@@ -141,6 +145,9 @@ export const CanvasNode = React.memo(function CanvasNode({
     const assetTags = data.metadata?.assetTags?.filter((tag) => tag.trim()) || [];
     const scriptMinHeight = data.type === CanvasNodeType.Script ? storyboardMinNodeHeight(data.metadata?.storyboardComposerHeight) : null;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const nodeRef = useRef<HTMLDivElement>(null);
+    const shellRef = useRef<HTMLDivElement>(null);
+    const resizeMotion = useCanvasNodeResizeStyle(nodeRef, data, dragOffset);
     const handleResizePointerDown = useCanvasNodeResize(data, scale, scriptMinHeight, onResize, readOnly);
 
     useEffect(() => {
@@ -188,12 +195,15 @@ export const CanvasNode = React.memo(function CanvasNode({
         if (next !== data.title) onTitleChange?.(data.id, next);
     };
 
-    const connectionTilt = isConnectionTarget && !reduceMediaEffects && !dragOffset
+    const connectionTilt = isConnectionTarget && !disableMediaEffects && !dragOffset
         ? canvasConnectionTilt(data, connectionApproach) : undefined;
+    useCanvasConnectionTilt(nodeRef, shellRef, connectionTilt);
 
     return (
         <div
+            ref={nodeRef}
             data-node-id={data.id}
+            data-popover-anchor-container
             data-node-lod={effectiveRenderLOD}
             className={`node-element absolute flex select-none flex-col ${dragOffset ? "cursor-grabbing" : data.type === CanvasNodeType.Drawing ? "cursor-pointer" : "cursor-default"} ${isSelected && data.type === CanvasNodeType.Video ? "z-[var(--z-node-toolbar)]" : isSelected || isFocusRelated || isConnectionTarget ? "z-[var(--z-node-active)]" : "z-[var(--z-node)]"}`}
             style={{
@@ -211,6 +221,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 onHoverEnd(data.id);
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
+            onPointerDownCapture={() => resizeMotion?.finishAll()}
         >
             {showChrome ? <NodeExternalHeader
                 node={data}
@@ -221,12 +232,13 @@ export const CanvasNode = React.memo(function CanvasNode({
                 editing={isEditingTitle}
                 draft={titleDraft}
                 theme={theme}
-                onDraftChange={setTitleDraft}
+                onDraftChange={(value) => { setTitleDraft(value); onTitleChange?.(data.id, value); }}
                 onEdit={() => setIsEditingTitle(true)}
                 onCommit={commitTitle}
                 onCancel={() => { setTitleDraft(data.title); setIsEditingTitle(false); }}
             /> : null}
             <div
+                ref={shellRef}
                 className="canvas-node-shell relative h-full w-full overflow-visible rounded-[var(--node-radius)]"
                 data-node-state={nodeState}
                 data-connection-tilt={connectionTilt ? "true" : undefined}
@@ -237,9 +249,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                     border: isComposerNode ? "0" : "1px solid transparent",
                     boxShadow: isComposerNode || !showChrome ? "none" : isSelected || isFocusRelated ? theme.node.hoverShadow : theme.node.shadow,
                     outline: !showChrome && isActive ? `1px solid ${theme.node.activeStroke}` : undefined,
-                    "--connection-tilt-x": `${connectionTilt?.rotateX || 0}deg`,
-                    "--connection-tilt-y": `${connectionTilt?.rotateY || 0}deg`,
-                    transformOrigin: connectionTilt?.origin,
                 } as React.CSSProperties}
                 onMouseDown={(event) => onMouseDown(event, data.id)}
                 onDoubleClick={(event) => {
@@ -273,7 +282,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onOpenTextEditor?.(data);
                         return;
                     }
-                    if (readOnly || data.type !== CanvasNodeType.Text) return;
+                    if (readOnly || data.metadata?.locked || data.type !== CanvasNodeType.Text) return;
                     event.stopPropagation();
                     setIsEditingContent(true);
                 }}
@@ -300,6 +309,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         theme={theme}
                         renderLOD={effectiveRenderLOD}
                         isEditingContent={isEditingContent}
+                        contentReadOnly={readOnly || Boolean(data.metadata?.locked)}
                         textareaRef={textareaRef}
                         isBatchRoot={isBatchRoot}
                         batchCount={batchCount}
@@ -316,7 +326,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onReloadResource={onReloadResource}
                         onOpenTaskDetails={onOpenTaskDetails}
                         onToggleBatch={() => onToggleBatch?.(data.id)}
-                        reduceMediaEffects={reduceMediaEffects}
+                        disableMediaEffects={disableMediaEffects}
                         mediaActive={mediaActive}
                         onMediaPlayRequest={onMediaPlayRequest}
                     />
@@ -341,30 +351,13 @@ export const CanvasNode = React.memo(function CanvasNode({
                     </div>
                 ) : null}
 
-                {showChrome && data.metadata?.versionLabel ? (
-                    <button
-                        type="button"
-                        className="absolute left-3 top-3 z-[var(--node-z-overlay)] grid size-7 place-items-center rounded-[var(--r-full)] border p-0.5 text-[var(--node-badge-fs)] font-semibold leading-none backdrop-blur-md transition-[transform,background,border-color,box-shadow] hover:-translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 motion-reduce:hover:translate-y-0"
-                        style={{
-                            background: data.metadata.versionPrimary ? theme.accent.primarySoft : theme.toolbar.panel,
-                            borderColor: data.metadata.versionPrimary ? theme.accent.primary : theme.toolbar.border,
-                            color: data.metadata.versionPrimary ? theme.accent.primary : theme.node.text,
-                            outlineColor: theme.accent.primary,
-                        }}
-                        title={data.metadata.versionLabel + (data.metadata.versionPrimary ? " · 主版本" : "") + "，点击查看版本对比"}
-                        aria-label={data.metadata.versionLabel + (data.metadata.versionPrimary ? "，主版本" : "") + "，查看版本对比"}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={(event) => { event.stopPropagation(); onOpenVersions?.(data); }}
-                    >
-                        {data.metadata.versionLabel}
-                    </button>
-                ) : null}
                 {showChrome && showStatusTrack ? (
-                    <div className={`absolute right-3 top-3 z-[var(--node-z-overlay)] flex min-w-0 items-center justify-end gap-1 ${data.metadata?.versionLabel ? "max-w-[calc(100%-104px)]" : "max-w-[calc(100%-24px)]"}`}>
+                    <div className="absolute right-3 top-3 z-[var(--node-z-overlay)] flex min-w-0 items-center justify-end gap-1 max-w-[calc(100%-24px)]">
                         {resourceLabel && data.type !== CanvasNodeType.Image ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
                         {hasMediaContent && !readOnly ? <ResourceStorageBadge storageKey={data.metadata?.storageKey} active={isActive} theme={theme} /> : null}
                         {isBatchRoot ? <BatchToggleBadge count={batchCount} expanded={batchExpanded} theme={theme} onToggle={() => onToggleBatch?.(data.id)} /> : null}
-                        {isBatchChild && !readOnly ? <BatchPrimaryBadge visible={batchPrimary || hovered || isSelected} selected={batchPrimary} theme={theme} onSelect={() => onSetBatchPrimary?.(data)} /> : null}
+                        {data.metadata?.imageLayerGroup && !readOnly ? <CanvasImageLayerControls node={data} /> : null}
+                        {isBatchChild && !data.metadata?.imageLayer && !data.metadata?.layerExtraction && !readOnly ? <BatchPrimaryBadge visible={batchPrimary || hovered || isSelected} selected={batchPrimary} theme={theme} onSelect={() => onSetBatchPrimary?.(data)} /> : null}
                         {data.metadata?.locked ? <NodeLockBadge theme={theme} /> : null}
                     </div>
                 ) : null}
@@ -378,7 +371,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         <div className="flex items-center gap-0.5 rounded-[var(--r-md)] border px-1 py-1 backdrop-blur-xl" style={{ background: `${theme.toolbar.panel}e6`, borderColor: theme.toolbar.border }}>
                             {hasImageContent ? <BatchChildActionButton theme={theme} label="下载图片" icon={<Download className="size-3.5" />} onClick={() => downloadNode?.(data)} /> : null}
                             {hasImageContent ? <BatchChildActionButton theme={theme} label="创建副本" icon={<Copy className="size-3.5" />} onClick={() => duplicateNode?.(data)} /> : null}
-                            {hasImageContent ? (
+                            {hasImageContent && !data.metadata?.imageLayer && !data.metadata?.layerExtraction ? (
                                 <BatchChildActionButton theme={theme} label={batchPrimary ? "当前主图" : "设为主图"} icon={<Star className={`size-3.5 ${batchPrimary ? "fill-current" : ""}`} style={{ color: theme.accent.primary }} />} onClick={() => onSetBatchPrimary?.(data)} />
                             ) : null}
                             {data.metadata?.status === "error" && data.metadata.resourceReloadAvailable ? <BatchChildActionButton theme={theme} label="重新加载资源" icon={<Download className="size-3.5" />} onClick={() => onReloadResource?.(data)} /> : null}
@@ -388,9 +381,9 @@ export const CanvasNode = React.memo(function CanvasNode({
                     </div>
                 ) : null}
                 {/* 批次主图位（折叠根节点封面）常驻下载按钮 */}
-                {showChrome && isBatchRoot && hasImageContent && !readOnly ? (
+                {showChrome && isBatchRoot && hasImageContent && !readOnly && (!data.metadata?.imageLayerGroup?.compositeStatus || data.metadata.imageLayerGroup.compositeStatus === "ready") ? (
                     <div className="absolute bottom-2 right-2 z-[var(--node-z-overlay)]" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-                        <BatchChildActionButton theme={theme} label="下载主图" icon={<Download className="size-3.5" />} onClick={() => downloadNode?.(data)} />
+                        <BatchChildActionButton theme={theme} label={data.metadata?.imageLayerGroup ? "下载合成图" : "下载主图"} icon={<Download className="size-3.5" />} onClick={() => downloadNode?.(data)} />
                     </div>
                 ) : null}
                 {showChrome && (assetTags.length || showProducedModel || (showImageInfo && hasImageContent)) ? (
@@ -411,8 +404,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 </> : null}
             </div>
 
-            {(showChrome || forceInputVisible) && !readOnly && data.type !== CanvasNodeType.Script && data.type !== CanvasNodeType.BatchTable ? <ConnectionSideRail side="left" scale={scale} theme={theme} visible={hovered || forceInputVisible} onPointerDown={(event, anchorRatio) => onConnectStart(event, data.id, "target", undefined, anchorRatio)} /> : null}
-            {showChrome && !readOnly && data.type !== CanvasNodeType.Script && data.type !== CanvasNodeType.Config && showOutputConnection ? <ConnectionSideRail side="right" scale={scale} theme={theme} visible={hovered} onPointerDown={(event, anchorRatio) => onConnectStart(event, data.id, "source", undefined, anchorRatio)} /> : null}
+            {(showChrome || forceInputMounted) && !readOnly && data.type !== CanvasNodeType.Script && data.type !== CanvasNodeType.BatchTable ? <ConnectionSideRail side="left" scale={scale} theme={theme} visible={showConnectionRails} onPointerDown={(event, anchorRatio) => onConnectStart(event, data.id, "target", undefined, anchorRatio)} /> : null}
+            {showChrome && !readOnly && data.type !== CanvasNodeType.Script && data.type !== CanvasNodeType.Config && showOutputConnection ? <ConnectionSideRail side="right" scale={scale} theme={theme} visible={showConnectionRails} onPointerDown={(event, anchorRatio) => onConnectStart(event, data.id, "source", undefined, anchorRatio)} /> : null}
 
         </div>
     );
@@ -430,11 +423,12 @@ function areCanvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProp
         previous.isRelated === next.isRelated &&
         previous.isFocusRelated === next.isFocusRelated &&
         previous.isConnectionTarget === next.isConnectionTarget &&
+        previous.isConnecting === next.isConnecting &&
         previous.connectionApproach?.x === next.connectionApproach?.x &&
         previous.connectionApproach?.y === next.connectionApproach?.y &&
-        previous.forceInputVisible === next.forceInputVisible &&
+        previous.forceInputMounted === next.forceInputMounted &&
         previous.showImageInfo === next.showImageInfo &&
-        previous.reduceMediaEffects === next.reduceMediaEffects &&
+        previous.disableMediaEffects === next.disableMediaEffects &&
         previous.readOnly === next.readOnly &&
         previous.resourceLabel === next.resourceLabel &&
         previous.mentionReferences === next.mentionReferences &&
@@ -462,7 +456,6 @@ function areCanvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProp
         previous.onRetry === next.onRetry &&
         previous.onReloadResource === next.onReloadResource &&
         previous.onOpenTaskDetails === next.onOpenTaskDetails &&
-        previous.onOpenVersions === next.onOpenVersions &&
         previous.onViewImage === next.onViewImage &&
         previous.onReplaceMedia === next.onReplaceMedia &&
         previous.onOpenTextEditor === next.onOpenTextEditor &&
@@ -609,6 +602,7 @@ function NodeExternalHeader({ node, scale, dimensionLabel, active, editable, edi
                     <input
                         autoFocus
                         value={draft}
+                        readOnly={!editable}
                         className="h-6 min-w-20 max-w-[190px] flex-1 truncate rounded bg-transparent px-1.5 text-xs font-medium outline-none"
                         style={{ background: "transparent", color: theme.node.text }}
                         onChange={(event) => onDraftChange(event.target.value)}
@@ -687,7 +681,7 @@ function NodeStatusBadge({ status }: { status: "loading" | "success" | "error" }
     );
 }
 
-function ConnectionSideRail({ side, scale, theme, visible = false, onPointerDown }: { side: "left" | "right"; scale: number; theme: CanvasTheme; visible?: boolean; onPointerDown: (event: React.PointerEvent, anchorRatio: number) => void }) {
+function ConnectionSideRail({ side, scale, theme, visible, onPointerDown }: { side: "left" | "right"; scale: number; theme: CanvasTheme; visible: boolean; onPointerDown: (event: React.PointerEvent, anchorRatio: number) => void }) {
     const handleRef = useRef<HTMLSpanElement>(null);
     const [railHovered, setRailHovered] = useState(false);
     const inverseScale = 1 / Math.max(scale, 0.05);
@@ -727,7 +721,7 @@ function ConnectionSideRail({ side, scale, theme, visible = false, onPointerDown
         <button
             type="button"
             data-canvas-connection-rail={side}
-            className={`group pointer-events-auto absolute top-1/2 z-[var(--node-z-overlay)] flex -translate-y-1/2 items-center justify-center touch-none cursor-crosshair rounded-full outline-none transition-opacity duration-150 ${visible || railHovered ? "opacity-100" : "opacity-0"}`}
+            className={`group pointer-events-auto absolute top-1/2 z-[var(--node-z-overlay)] flex -translate-y-1/2 items-center justify-center touch-none cursor-crosshair rounded-full outline-none transition-opacity duration-150 focus-visible:opacity-100 ${visible || railHovered ? "opacity-100" : "opacity-0"}`}
             style={{ width: railSize, height: `min(100%, ${railSize}px)`, cursor: "crosshair", ...(side === "left" ? { right: "100%" } : { left: "100%" }) }}
             onPointerEnter={(event) => {
                 setRailHovered(true);

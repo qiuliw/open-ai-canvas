@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 48
+const CurrentSchemaVersion int64 = 61
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -30,6 +30,9 @@ const skillLibraryCategoriesChecksum = "sha256:skill-library-categories-v39-2026
 const builtinSkillTombstonesChecksum = "sha256:builtin-skill-tombstones-v40-20260927"
 const resourceThumbnailChecksum = "sha256:resource-thumbnail-v41-20260927"
 const discountGroupsChecksum = "sha256:discount-groups-v48-20261008"
+const workbenchToolsMigrationName = "workbench_tools_and_presets"
+const workbenchToolsMigrationChecksum = "sha256:workbench-tools-presets-v54-20261014"
+const legacyWorkbenchToolsMigrationChecksum = "sha256:workbench-tools-presets-v51-20261014"
 
 const postgresSchemaMigrationLockID int64 = 73123910420260830
 
@@ -153,6 +156,63 @@ var schemaMigrations = []migration{
 	{version: 46, name: "skill_curation", checksum: "sha256:skill-curation-v46-20261005", apply: migrateSkillCuration},
 	{version: 47, name: "skill_curation_roots", checksum: "sha256:skill-curation-roots-v47-20261005", apply: migrateSkillCurationRoots},
 	{version: 48, name: "discount_groups", checksum: discountGroupsChecksum, apply: migrateSchemaV48},
+	{version: 49, name: "channel_proxy_url", checksum: "sha256:channel-proxy-url-v48-20261009", apply: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasColumn(&model.ModelChannel{}, "ProxyURL") {
+			return tx.Migrator().AddColumn(&model.ModelChannel{}, "ProxyURL")
+		}
+		return nil
+	}},
+	{version: 50, name: "banner_sort_order", checksum: "sha256:banner-sort-order-v49-20261010", apply: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasColumn(&model.BannerAnnouncement{}, "SortOrder") {
+			return tx.Migrator().AddColumn(&model.BannerAnnouncement{}, "SortOrder")
+		}
+		return nil
+	}},
+	{version: 51, name: "canvas_mutation_receipts", checksum: "sha256:canvas-mutation-receipts-v50-20261011", apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.CanvasMutationReceipt{})
+	}},
+	{version: 52, name: "personal_profile_security", checksum: "sha256:personal-profile-security-v51-20261012", apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.User{}, &model.AuthSession{}, &model.OAuthState{}, &model.AuthVerification{}, &model.UserAvatar{})
+	}},
+	{version: 53, name: "user_avatar_presets", checksum: "sha256:user-avatar-presets-v52-20261012", apply: func(tx *gorm.DB) error {
+		if tx.Migrator().HasColumn(&model.User{}, "AvatarPreset") {
+			return nil
+		}
+		return tx.Migrator().AddColumn(&model.User{}, "AvatarPreset")
+	}},
+	{version: 54, name: "user_login_logs", checksum: "sha256:user-login-logs-v53", apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.LoginLog{})
+	}},
+	{version: 55, name: workbenchToolsMigrationName, checksum: workbenchToolsMigrationChecksum, apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.WorkbenchTool{}, &model.WorkbenchPreset{}, &model.Task{})
+	}},
+	{version: 56, name: "provider_catalog_source", checksum: "sha256:provider-catalog-source-v55", apply: func(tx *gorm.DB) error {
+		if !tx.Migrator().HasColumn(&model.ModelChannel{}, "CatalogProviderID") {
+			if err := tx.Migrator().AddColumn(&model.ModelChannel{}, "CatalogProviderID"); err != nil {
+				return err
+			}
+		}
+		if !tx.Migrator().HasColumn(&model.ChannelModel{}, "CatalogModelKey") {
+			return tx.Migrator().AddColumn(&model.ChannelModel{}, "CatalogModelKey")
+		}
+		return nil
+	}},
+	{version: 57, name: "sql_perf_indexes", checksum: "sha256:sql-perf-indexes-v56-20261016", apply: migrateSchemaV56},
+	{version: 58, name: "canvas_multi_session_sync", checksum: "sha256:canvas-multi-session-sync-v57", apply: migrateCanvasCollaboration},
+	{version: 59, name: "agent_memory_proposals", checksum: "sha256:agent-memory-proposals-v58", apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.AgentLesson{}, &model.AgentMemorySetting{}, &model.AgentMemoryProposal{}, &model.AgentMemoryRevision{})
+	}},
+	{version: 60, name: "channel_model_protocol_length", checksum: "sha256:channel-model-protocol-length-v59", apply: migrateChannelModelProtocolLength},
+	{version: 61, name: "user_feedbacks", checksum: "sha256:user-feedbacks-v60-20261020", apply: func(tx *gorm.DB) error {
+		return tx.AutoMigrate(&model.UserFeedback{})
+	}},
+}
+
+func migrateChannelModelProtocolLength(tx *gorm.DB) error {
+	if tx.Dialector.Name() == "postgres" {
+		return tx.Exec("ALTER TABLE channel_models ALTER COLUMN protocol TYPE varchar(64)").Error
+	}
+	return tx.Migrator().AlterColumn(&model.ChannelModel{}, "Protocol")
 }
 
 func migratePrefixedIDSequenceReconcile(tx *gorm.DB) error {
@@ -482,6 +542,62 @@ func migrateSchemaV12(tx *gorm.DB) error {
 	return nil
 }
 
+func normalizeLegacyWorkbenchMigration(tx *gorm.DB) error {
+	var legacy schemaMigration
+	if err := tx.First(&legacy, "version = ?", 51).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("读取旧工作台迁移记录：%w", err)
+	}
+	if legacy.Name != workbenchToolsMigrationName || legacy.Checksum != legacyWorkbenchToolsMigrationChecksum {
+		return nil
+	}
+
+	var later []schemaMigration
+	if err := tx.Where("version > ?", legacy.Version).Order("version asc").Find(&later).Error; err != nil {
+		return fmt.Errorf("读取旧工作台迁移后的记录：%w", err)
+	}
+	if len(later) > 0 {
+		return fmt.Errorf("数据库迁移 51 使用旧工作台身份，但已存在后续迁移记录 %d；拒绝自动改写迁移账本", later[0].Version)
+	}
+	if !tx.Migrator().HasTable(&model.WorkbenchTool{}) || !tx.Migrator().HasTable(&model.WorkbenchPreset{}) {
+		return fmt.Errorf("数据库迁移 51 记录为旧工作台迁移，但工作台表不完整；请从备份恢复后再升级")
+	}
+
+	result := tx.Model(&schemaMigration{}).
+		Where("version = ? AND name = ? AND checksum = ?", legacy.Version, legacy.Name, legacy.Checksum).
+		Updates(map[string]any{
+			"version":  workbenchToolsMigrationVersion,
+			"name":     workbenchToolsMigrationName,
+			"checksum": workbenchToolsMigrationChecksum,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("归一化旧工作台迁移记录：%w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("归一化旧工作台迁移记录影响 %d 行，拒绝继续启动", result.RowsAffected)
+	}
+	return nil
+}
+
+const workbenchToolsMigrationVersion int64 = 54
+
+func migrateSchemaV56(tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&model.ApiCallLog{}, &model.Task{}, &model.CreditLedgerEntry{}); err != nil {
+		return fmt.Errorf("迁移 SQL 性能索引：%w", err)
+	}
+	if tx.Dialector.Name() == "sqlite" {
+		if err := tx.Exec("UPDATE api_call_logs SET created_at_epoch = unixepoch(created_at) WHERE created_at_epoch = 0 OR created_at_epoch IS NULL").Error; err != nil {
+			return fmt.Errorf("回填 api_call_logs 时间戳：%w", err)
+		}
+		if err := tx.Exec("UPDATE tasks SET created_at_epoch = unixepoch(created_at) WHERE created_at_epoch = 0 OR created_at_epoch IS NULL").Error; err != nil {
+			return fmt.Errorf("回填 tasks 时间戳：%w", err)
+		}
+	}
+	return nil
+}
+
 func MigrateSchema(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if tx.Dialector.Name() == "postgres" {
@@ -491,6 +607,9 @@ func MigrateSchema(db *gorm.DB) error {
 		}
 		if err := tx.AutoMigrate(&schemaMigration{}); err != nil {
 			return fmt.Errorf("初始化数据库迁移记录：%w", err)
+		}
+		if err := normalizeLegacyWorkbenchMigration(tx); err != nil {
+			return err
 		}
 		plan, err := migrationsForDatabase(tx)
 		if err != nil {

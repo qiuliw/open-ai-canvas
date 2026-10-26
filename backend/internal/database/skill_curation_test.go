@@ -3,9 +3,9 @@ package database
 import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"yingce/backend/internal/model"
 	"path/filepath"
 	"testing"
+	"yingce/backend/internal/model"
 )
 
 func TestSkillCurationUpgradeAndRollback(t *testing.T) {

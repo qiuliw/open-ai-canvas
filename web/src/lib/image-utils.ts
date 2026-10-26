@@ -28,10 +28,14 @@ function decodeDataUrl(url: string): { bytes: Uint8Array<ArrayBuffer>; mimeType:
         const encoded = new TextEncoder().encode(payload);
         const output: number[] = [];
         for (let cursor = 0; cursor < encoded.length; cursor++) {
-            if (encoded[cursor] !== 37) { output.push(encoded[cursor]); continue; }
+            if (encoded[cursor] !== 37) {
+                output.push(encoded[cursor]);
+                continue;
+            }
             const hex = String.fromCharCode(...encoded.slice(cursor + 1, cursor + 3));
             if (!/^[0-9a-f]{2}$/i.test(hex)) throw new Error("图片数据包含无效的转义字符");
-            output.push(parseInt(hex, 16)); cursor += 2;
+            output.push(parseInt(hex, 16));
+            cursor += 2;
         }
         bytes = Uint8Array.from(output);
     }
@@ -47,7 +51,9 @@ export function getDataUrlByteSize(url: string): number {
             return Math.floor(payload.replace(/=+$/, "").length * 0.75);
         }
         return decodeDataUrl(url).bytes.byteLength;
-    } catch { return 0; }
+    } catch {
+        return 0;
+    }
 }
 
 export async function readFileAsDataUrl(file: Blob): Promise<string> {

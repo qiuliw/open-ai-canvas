@@ -2,9 +2,9 @@ package canvas
 
 import (
 	"encoding/json"
-	"yingce/backend/internal/assets"
 	"strings"
 	"testing"
+	"yingce/backend/internal/assets"
 
 	"yingce/backend/internal/model"
 )

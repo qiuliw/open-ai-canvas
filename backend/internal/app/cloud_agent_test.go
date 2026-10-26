@@ -307,6 +307,20 @@ func TestCloudAgentValidationNormalizesFocusNodeIDs(t *testing.T) {
 	}
 
 	req = agentTestRequest()
+	req.FocusNodeOmittedCount = 4
+	if err := validateCloudAgentRequest(&req); err != nil {
+		t.Fatalf("bounded omitted focus count should be accepted: %v", err)
+	}
+	req.FocusNodeOmittedCount = -1
+	if err := validateCloudAgentRequest(&req); err == nil {
+		t.Fatal("negative omitted focus count must be rejected")
+	}
+	req.FocusNodeOmittedCount = 10001
+	if err := validateCloudAgentRequest(&req); err == nil {
+		t.Fatal("unbounded omitted focus count must be rejected")
+	}
+
+	req = agentTestRequest()
 	req.FocusNodeIDs = []string{"node-1", " node-1 "}
 	if err := validateCloudAgentRequest(&req); err == nil {
 		t.Fatal("focus node IDs that normalize to the same node must be rejected")
@@ -620,7 +634,7 @@ func TestCloudAgentToolLoopPersistsApprovalAndAppliesCanvasWrite(t *testing.T) {
 func TestCloudAgentNodeTypesExposeExecutableAllowList(t *testing.T) {
 	result := cloudAgentNodeTypes()
 	nodes, ok := result["nodes"].([]map[string]any)
-	if !ok || len(nodes) != 9 {
+	if !ok || len(nodes) != 10 {
 		t.Fatalf("unexpected node registry: %#v", result)
 	}
 	var character map[string]any

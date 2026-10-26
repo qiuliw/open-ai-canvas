@@ -18,16 +18,44 @@ export function CanvasSizePicker({ value, className, onChange }: CanvasSizePicke
     };
     return (
         <div className={className} data-canvas-no-zoom onPointerDown={(event) => event.stopPropagation()}>
-            <Select ariaLabel="生成比例" className="canvas-compact-control canvas-control-select h-full w-full" placeholder="比例" showSearch
-                value={value || undefined} options={options} searchValue={query} open={expanded} popupMatchSelectWidth={false}
-                onSearch={(text) => { draft.current = text; setQuery(text); }} onOpenChange={setExpanded}
-                onChange={commit} onBlur={() => { if (draft.current.trim()) commit(draft.current); else setExpanded(false); }}
+            <Select
+                ariaLabel="生成比例"
+                className="canvas-compact-control canvas-control-select h-full w-full"
+                placeholder="比例"
+                showSearch
+                value={value || undefined}
+                options={options}
+                searchValue={query}
+                open={expanded}
+                popupMatchSelectWidth={false}
+                onSearch={(text) => {
+                    draft.current = text;
+                    setQuery(text);
+                }}
+                onOpenChange={setExpanded}
+                onChange={commit}
+                onBlur={() => {
+                    if (draft.current.trim()) commit(draft.current);
+                    else setExpanded(false);
+                }}
                 onInputKeyDown={(event) => {
                     if (event.nativeEvent.isComposing) return;
-                    if (event.key === "Enter" && draft.current.trim()) { event.preventDefault(); commit(draft.current); }
-                    if (event.key === "Escape") { draft.current = ""; setQuery(""); setExpanded(false); }
+                    if (event.key === "Enter" && draft.current.trim()) {
+                        event.preventDefault();
+                        commit(draft.current);
+                    }
+                    if (event.key === "Escape") {
+                        draft.current = "";
+                        setQuery("");
+                        setExpanded(false);
+                    }
                 }}
-                popupRender={(menu) => <div onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>{menu}</div>} />
+                popupRender={(menu) => (
+                    <div onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+                        {menu}
+                    </div>
+                )}
+            />
         </div>
     );
 }

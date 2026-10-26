@@ -5,8 +5,14 @@ export function composerReferences(inputs: NodeGenerationInput[], skills: Canvas
     const media = inputs.map((input): CanvasResourceReference => {
         const label = generationInputMentionLabel(input, inputs);
         return {
-            id: `composer:${input.nodeId}`, nodeId: input.nodeId, kind: input.type, label,
-            mentionToken: `@${label}`, title: input.title, active: true, text: input.text,
+            id: `composer:${input.nodeId}`,
+            nodeId: input.nodeId,
+            kind: input.type,
+            label,
+            mentionToken: `@${label}`,
+            title: input.title,
+            active: true,
+            text: input.text,
             previewUrl: input.sourceKind === "drawing" ? undefined : input.image?.dataUrl || input.previewUrl,
         };
     });

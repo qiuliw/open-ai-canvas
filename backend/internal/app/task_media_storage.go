@@ -130,7 +130,18 @@ func (s *Service) downloadTaskMedia(ctx context.Context, config providerConfig, 
 		ApplyOutboundHeaders(req, config.Headers)
 	}
 	ApplyDefaultOutboundHeaders(req)
-	response, err := OutboundHTTPClient(3 * time.Minute).Do(req)
+	// 结果文件可能托管在渠道同域（sameProviderOrigin 时还带渠道鉴权），
+	// 渠道配置了出站代理时下载必须走同一代理，否则配代理渠道的结果无法取回。
+	proxyURL := ""
+	if metadata, ok := ctx.Value(providerAnalyticsKey{}).(providerAnalyticsContext); ok {
+		proxyURL = metadata.ProxyURL
+	}
+	if strings.TrimSpace(proxyURL) == "" && strings.TrimSpace(config.ChannelID) != "" {
+		if ch, err := s.repo.SystemChannel(config.ChannelID); err == nil {
+			proxyURL = ch.ProxyURL
+		}
+	}
+	response, err := OutboundHTTPClientWithProxy(3*time.Minute, proxyURL).Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -237,10 +248,10 @@ func (s *Service) storeTaskMediaFile(task *model.Task, index int, path, mimeType
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			return nil, err
 		}
-	} else if kind == "audio" {
-		// Audio duration is the source of truth for per-second settlement. The
-		// media can still be saved when ffprobe is unavailable; settlement then
-		// moves the order to review instead of silently charging a fake length.
+	} else if kind == "audio" || kind == "video" {
+		// Audio and video-processing duration is the source of truth for per-second
+		// settlement. The media can still be saved when ffprobe is unavailable;
+		// settlement then falls back to provider usage or moves the order to review.
 		durationMs = probeMediaDurationMs(path)
 	}
 	day, err := s.reserveGeneratedResourceQuota(task.UserID, info.Size())

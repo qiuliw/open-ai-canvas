@@ -36,9 +36,7 @@ export function resolveUpscaleSize(width: number, height: number, requested: num
     assertPixelSize({ width, height });
     if (!Number.isFinite(requested) || requested <= 0) throw new RangeError("目标尺寸无效");
     const edge = Math.max(1, Math.min(MAX_UPSCALE_LONG_EDGE, Math.round(requested)));
-    return width >= height
-        ? { width: edge, height: Math.max(1, Math.round((height / width) * edge)) }
-        : { width: Math.max(1, Math.round((width / height) * edge)), height: edge };
+    return width >= height ? { width: edge, height: Math.max(1, Math.round((height / width) * edge)) } : { width: Math.max(1, Math.round((width / height) * edge)), height: edge };
 }
 
 export function resolveCropPixels(size: PixelSize, selection?: ImageCropRect): ImageCropRect {

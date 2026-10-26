@@ -3,9 +3,12 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"yingce/backend/internal/canvas/capability"
 	"yingce/backend/internal/model"
@@ -98,9 +101,9 @@ func TestCloudAgentCanvasSummaryIsACatalogNotNodeBodies(t *testing.T) {
 func TestCloudAgentCanvasSummaryUsesSelectedNodeNeighborhood(t *testing.T) {
 	doc := map[string]any{
 		"nodes": []map[string]any{
-			{"id": "focus", "type": "text", "title": "主体"},
-			{"id": "neighbor", "type": "image", "title": "关联素材"},
-			{"id": "unrelated", "type": "text", "title": "无关内容"},
+			{"id": "focus", "type": "text", "title": "主体", "metadata": map[string]any{"content": strings.Repeat("主体设定", 200), "status": "success", "taskStatus": "succeeded"}},
+			{"id": "neighbor", "type": "image", "title": "关联素材", "metadata": map[string]any{"status": "loading"}},
+			{"id": "unrelated", "type": "text", "title": "无关内容", "metadata": map[string]any{"content": "不应被摘要"}},
 		},
 		"connections": []map[string]any{{"fromNodeId": "focus", "toNodeId": "neighbor"}},
 	}
@@ -120,12 +123,47 @@ func TestCloudAgentCanvasSummaryUsesSelectedNodeNeighborhood(t *testing.T) {
 	if strings.Contains(string(encoded), "unrelated") || !strings.Contains(string(encoded), "focus") || !strings.Contains(string(encoded), "neighbor") {
 		t.Fatalf("focused catalog did not include exactly the local graph neighborhood: %s", encoded)
 	}
+	foundFocus := false
+	for _, rawNode := range result["nodes"].([]any) {
+		node := rawNode.(map[string]any)
+		if node["id"] != "focus" {
+			continue
+		}
+		foundFocus = true
+		preview, _ := node["preview"].(string)
+		if utf8.RuneCountInString(preview) > 243 || !strings.Contains(preview, "主体设定") || node["status"] != "success" || node["taskStatus"] != "succeeded" {
+			t.Fatalf("focus facts should be bounded and accurate: %+v", node)
+		}
+	}
+	if !foundFocus {
+		t.Fatalf("focus node missing from selection catalog: %s", encoded)
+	}
 	selection := result["selection"].(map[string]any)
 	if selection["includedNeighbors"] != float64(1) || selection["nextReadDepth"] != float64(1) {
 		t.Fatalf("focused catalog metadata is incorrect: %+v", selection)
 	}
 	if _, err := cloudAgentCanvasSummary(&model.CanvasProject{PayloadJSON: string(raw)}, "deleted"); err == nil {
 		t.Fatal("stale selected node was accepted")
+	}
+}
+
+func TestCloudAgentCanvasSummaryReportsOmittedFocusedNodes(t *testing.T) {
+	doc := map[string]any{"nodes": []map[string]any{{"id": "focus", "type": "text", "title": "主体"}}}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := cloudAgentCanvasSummaryWithOmitted(&model.CanvasProject{PayloadJSON: string(raw)}, 4, "focus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(summary), &result); err != nil {
+		t.Fatal(err)
+	}
+	selection := result["selection"].(map[string]any)
+	if selection["omittedFocusCount"] != float64(4) || !strings.Contains(stringValue(selection["note"]), "4 个节点未附带") {
+		t.Fatalf("selection overflow count was not disclosed: %+v", selection)
 	}
 }
 
@@ -144,8 +182,10 @@ func TestCloudAgentToolsFollowCanvasCapabilityRegistry(t *testing.T) {
 		t.Fatal("canvas write tool is missing")
 	}
 	ops := apply["properties"].(map[string]any)["ops"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
-	if got := ops["nodeType"].(map[string]any)["enum"]; !reflect.DeepEqual(got, canvasCapabilityRegistry.Types()) {
-		t.Fatalf("node types differ from registry: %v", got)
+	gotNodeTypes, _ := json.Marshal(ops["nodeType"].(map[string]any)["enum"])
+	wantNodeTypes, _ := json.Marshal(canvasCapabilityRegistry.Types())
+	if string(gotNodeTypes) != string(wantNodeTypes) {
+		t.Fatalf("node types differ from registry: %s", gotNodeTypes)
 	}
 	patch := ops["patch"].(map[string]any)["properties"].(map[string]any)
 	nodeTypes := cloudAgentNodeTypes()["nodes"].([]map[string]any)
@@ -182,8 +222,18 @@ func TestCloudAgentToolsFollowCanvasCapabilityRegistry(t *testing.T) {
 	if accepted, _ := script["acceptedInputKinds"].([]string); !reflect.DeepEqual(accepted, []string{"audio", "character", "image", "text", "video"}) {
 		t.Fatalf("script accepted input kinds are incomplete: %#v", script["acceptedInputKinds"])
 	}
-	if got := functions["generate_media"]["properties"].(map[string]any)["mode"].(map[string]any)["enum"]; !reflect.DeepEqual(got, cloudAgentGenerationModeNames()) {
-		t.Fatalf("generation modes differ from implemented adapters: %v", got)
+	gotModes, _ := json.Marshal(functions["generate_media"]["properties"].(map[string]any)["mode"].(map[string]any)["enum"])
+	wantModes, _ := json.Marshal(cloudAgentGenerationModeNames())
+	if string(gotModes) != string(wantModes) {
+		t.Fatalf("generation modes differ from implemented adapters: %s", gotModes)
+	}
+	sizeDescription, _ := functions["generate_media"]["properties"].(map[string]any)["size"].(map[string]any)["description"].(string)
+	if !strings.Contains(sizeDescription, "imageSize/image.size.parameter") || !strings.Contains(sizeDescription, "allowCustom=true") {
+		t.Fatalf("generation size schema does not explain model-specific parameters: %q", sizeDescription)
+	}
+	splitProperties := functions["image_layer_split"]["properties"].(map[string]any)
+	if _, ok := splitProperties["size"]; !ok {
+		t.Fatal("image_layer_split is missing the shared image size field")
 	}
 	if got := CloudAgentCapabilitySetInfo(); got.Hash != canvasCapabilityRegistry.Hash() || got.Version != capability.SetVersion || !reflect.DeepEqual(got.Nodes, canvasCapabilityRegistry.Types()) {
 		t.Fatalf("capability endpoint info differs from registry: %+v", got)
@@ -363,6 +413,49 @@ func TestCloudAgentProjectionRejectsMissingAdapterAndOpaqueMetadata(t *testing.T
 	meta["storyboard"] = map[string]any{"rows": []any{}}
 	if _, err := cloudAgentProjectNodeFields(node, meta, descriptor, descriptor.DetailFields, 16000, true, 0); err == nil {
 		t.Fatal("unregistered structured projector must fail closed")
+	}
+}
+
+func TestCloudAgentTextResourceProjectionHidesLocator(t *testing.T) {
+	node := map[string]any{"id": "novel", "type": "text", "title": "小说原文"}
+	meta := map[string]any{"content": "/api/resources/novel-res/file", "storageKey": "resource:novel-res", "mimeType": "text/plain"}
+	descriptor, _ := cloudAgentNodeCapabilityForType("text")
+	projected, err := cloudAgentProjectNodeFields(node, meta, descriptor, descriptor.DetailFields, 16000, true, 0)
+	if err != nil || projected["content"] != nil || projected["contentAvailable"] != true || projected["contentSource"] != "resource" {
+		t.Fatalf("resource locator leaked or content availability missing: %v, %v", projected, err)
+	}
+}
+
+func TestCloudAgentReadTextLoadsOwnedResource(t *testing.T) {
+	s, db, _, _ := creationTestService(t)
+	content := "第一章\n林逸在石殿中醒来。"
+	objectKey := "users/user-1/file/novel.txt"
+	resource := model.Resource{ID: "novel-res", UserID: "user", Kind: "file", Status: model.ResourceStatusReady, Provider: "local", ObjectKey: objectKey, MimeType: "text/plain", Size: int64(len(content))}
+	if err := db.Create(&resource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(s.dataDir, "resources", filepath.Dir(objectKey)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.dataDir, "resources", objectKey), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"nodes": []map[string]any{{"id": "novel", "type": "text", "title": "小说原文", "metadata": map[string]any{"storageKey": "resource:novel-res", "content": "/api/resources/novel-res/file", "mimeType": "text/plain"}}}, "connections": []any{}}
+	raw, _ := json.Marshal(doc)
+	if err := db.Create(&model.CanvasProject{ID: "agent-canvas", UserID: "user", PayloadJSON: string(raw)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	state := &cloudAgentRuntime{Request: CloudAgentRequest{CanvasID: "agent-canvas"}}
+	call := cloudAgentCall{ID: "read-text"}
+	call.Function.Name = "canvas_read_text"
+	call.Function.Arguments = `{"nodeId":"novel"}`
+	result, err := cloudAgentReadTool(s.repo, "user", state, call, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, ok := result.(map[string]any)
+	if !ok || view["content"] != content || view["hasMore"] != false {
+		t.Fatalf("unexpected text resource result: %#v", result)
 	}
 }
 

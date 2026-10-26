@@ -1,11 +1,11 @@
 package skills
 
 import (
+	"strings"
+	"unicode/utf8"
 	"yingce/backend/internal/kernel"
 	"yingce/backend/internal/model"
 	"yingce/backend/internal/repository"
-	"strings"
-	"unicode/utf8"
 )
 
 func activeCurationRoot(state *SkillCuration, id string) bool {

@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 
 import { resolveCanvasAppearance, resolveCanvasGridColor, type CanvasAppearance } from "@/lib/canvas/canvas-appearance";
 import { resolveCanvasPointerIntent } from "@/lib/canvas/canvas-selection";
+import { isDiscreteCanvasWheel } from "@/lib/canvas/canvas-wheel";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
-import { applyCanvasLiveViewport, subscribeCanvasViewportPreview } from "@/lib/canvas/canvas-live-viewport";
+import { applyCanvasLiveViewport, CANVAS_GRID_BLEED, canvasGridMetrics, subscribeCanvasViewportPreview } from "@/lib/canvas/canvas-live-viewport";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
 
@@ -14,6 +15,7 @@ type CanvasViewportProps = {
     appearance?: CanvasAppearance;
     backgroundMode?: CanvasBackgroundMode;
     onViewportChange: (viewport: ViewportTransform) => void;
+    onSelectedImageWheel?: (deltaPixels: number) => boolean;
     onViewportPreviewChange?: (viewport: ViewportTransform) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
     boxSelectEnabled?: boolean;
@@ -28,7 +30,7 @@ type CanvasViewportProps = {
     graphicsLayer?: React.ReactNode;
 };
 
-const CANVAS_WHEEL_IGNORE_SELECTOR = "[data-canvas-no-zoom],[data-canvas-wheel-scroll],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown";
+const CANVAS_WHEEL_IGNORE_SELECTOR = "input,textarea,select,[contenteditable]:not([contenteditable='false']),[data-canvas-no-zoom],[data-canvas-wheel-scroll],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown";
 const CANVAS_POINTER_IGNORE_SELECTOR = "[data-canvas-no-zoom],[data-connection-create-menu],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown";
 const CANVAS_INTERNAL_DRAG_SELECTOR = "[data-canvas-batch-table]";
 const WHEEL_ZOOM_DELTA = 72;
@@ -45,7 +47,27 @@ type PinchState = {
     initialScale: number;
 };
 
-export function CanvasViewport({ interactive = true, containerRef, viewport, appearance, backgroundMode = "lines", onViewportChange, onViewportPreviewChange, onCanvasMouseDown, boxSelectEnabled = false, onCanvasDoubleClick, onCanvasDeselect, onContextMenu, onDrop, onFileDragEnter, onFileDragLeave, onFileDragOver, graphicsLayer, children }: CanvasViewportProps) {
+export function CanvasViewport({
+    interactive = true,
+    containerRef,
+    viewport,
+    appearance,
+    backgroundMode = "dots",
+    onViewportChange,
+    onSelectedImageWheel,
+    onViewportPreviewChange,
+    onCanvasMouseDown,
+    boxSelectEnabled = false,
+    onCanvasDoubleClick,
+    onCanvasDeselect,
+    onContextMenu,
+    onDrop,
+    onFileDragEnter,
+    onFileDragLeave,
+    onFileDragOver,
+    graphicsLayer,
+    children,
+}: CanvasViewportProps) {
     const colorTheme = useActiveTheme();
     const resolvedAppearance = resolveCanvasAppearance(appearance, colorTheme);
     const panState = useRef({
@@ -68,6 +90,7 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
     const touchPointsRef = useRef(new Map<number, TouchPoint>());
     const pinchStateRef = useRef<PinchState>({ active: false, pointerIds: [-1, -1], initialDistance: 1, worldX: 0, worldY: 0, initialScale: viewport.k });
     const spacePressedRef = useRef(false);
+    const controlPressedRef = useRef(false);
     const [isSpacePressed, setIsSpacePressed] = useState(false);
     const [isPanning, setIsPanning] = useState(false);
 
@@ -118,7 +141,9 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
         [containerRef],
     );
 
-    const syncViewport = useCallback(() => { if (interactive) onViewportChange(viewportRef.current); }, [interactive, onViewportChange]);
+    const syncViewport = useCallback(() => {
+        if (interactive) onViewportChange(viewportRef.current);
+    }, [interactive, onViewportChange]);
 
     const scheduleViewportChange = useCallback(
         (next: ViewportTransform, commitAfterIdle = false) => {
@@ -128,14 +153,15 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
             const container = containerRef.current;
             if (container) container.dataset.canvasViewportInteracting = "true";
             nextViewportRef.current = next;
-            if (!frameRef.current) frameRef.current = requestAnimationFrame((now) => {
-                frameRef.current = null;
-                const pending = nextViewportRef.current;
-                if (!pending) return;
-                const notify = now - lastPreviewNotifyRef.current >= 32;
-                applyCanvasLiveViewport(containerRef.current, pending, notify);
-                if (notify) lastPreviewNotifyRef.current = now;
-            });
+            if (!frameRef.current)
+                frameRef.current = requestAnimationFrame((now) => {
+                    frameRef.current = null;
+                    const pending = nextViewportRef.current;
+                    if (!pending) return;
+                    const notify = now - lastPreviewNotifyRef.current >= 32;
+                    applyCanvasLiveViewport(containerRef.current, pending, notify);
+                    if (notify) lastPreviewNotifyRef.current = now;
+                });
             if (!commitAfterIdle) return;
             if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
             syncTimerRef.current = setTimeout(() => {
@@ -151,6 +177,7 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
     useEffect(() => {
         if (!interactive) return;
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Control") controlPressedRef.current = true;
             if (event.code !== "Space") return;
             if (event.target instanceof Element && event.target.closest("input,textarea,select,button,[contenteditable='true']")) return;
             event.preventDefault();
@@ -159,22 +186,24 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
         };
 
         const handleKeyUp = (event: KeyboardEvent) => {
+            if (event.key === "Control") controlPressedRef.current = false;
             if (event.code !== "Space") return;
             spacePressedRef.current = false;
             setIsSpacePressed(false);
         };
 
         const handleBlur = () => {
+            controlPressedRef.current = false;
             spacePressedRef.current = false;
             setIsSpacePressed(false);
         };
 
-        window.addEventListener("keydown", handleKeyDown);
-        window.addEventListener("keyup", handleKeyUp);
+        window.addEventListener("keydown", handleKeyDown, true);
+        window.addEventListener("keyup", handleKeyUp, true);
         window.addEventListener("blur", handleBlur);
         return () => {
-            window.removeEventListener("keydown", handleKeyDown);
-            window.removeEventListener("keyup", handleKeyUp);
+            window.removeEventListener("keydown", handleKeyDown, true);
+            window.removeEventListener("keyup", handleKeyUp, true);
             window.removeEventListener("blur", handleBlur);
         };
     }, [interactive]);
@@ -187,6 +216,12 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
             const absX = Math.abs(deltaX);
             const absY = Math.abs(deltaY);
             const isPinchZoom = event.ctrlKey || event.metaKey;
+            // Chromium also sets ctrlKey for touchpad pinch, but does not send a Control keydown.
+            const editing = document.activeElement?.matches("input,textarea,select,[contenteditable]:not([contenteditable='false'])");
+            if (event.ctrlKey && controlPressedRef.current && !event.metaKey && !event.shiftKey && !editing && !target?.closest(CANVAS_WHEEL_IGNORE_SELECTOR) && onSelectedImageWheel?.(deltaY)) {
+                event.preventDefault();
+                return;
+            }
             if (target?.closest(CANVAS_WHEEL_IGNORE_SELECTOR) && !isPinchZoom) {
                 // 内部区域保留纵向滚动，但横向手势不能泄漏为 macOS 浏览器前进/后退。
                 if (event.shiftKey || absX > absY) event.preventDefault();
@@ -197,17 +232,19 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
             event.preventDefault();
             interactingRef.current = true;
             const current = viewportRef.current;
-            const rawAbsY = Math.abs(event.deltaY);
-            const looksLikeMouseWheel = event.deltaMode !== 0 || (rawAbsY >= 80 && Math.abs(rawAbsY - Math.round(rawAbsY / 100) * 100) < 1);
+            const looksLikeMouseWheel = isDiscreteCanvasWheel(event.deltaY, event.deltaMode);
             const looksLikeTrackpadPan = !isPinchZoom && (event.shiftKey || absX > 0 || (!looksLikeMouseWheel && absY > 0));
 
             if (looksLikeTrackpadPan) {
                 const panX = event.shiftKey && absX < 1 ? deltaY : deltaX;
-                scheduleViewportChange({
-                    x: current.x - panX,
-                    y: current.y - (event.shiftKey && absX < 1 ? 0 : deltaY),
-                    k: current.k,
-                }, true);
+                scheduleViewportChange(
+                    {
+                        x: current.x - panX,
+                        y: current.y - (event.shiftKey && absX < 1 ? 0 : deltaY),
+                        k: current.k,
+                    },
+                    true,
+                );
                 return;
             }
 
@@ -221,13 +258,16 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
             const worldX = (mouseX - current.x) / current.k;
             const worldY = (mouseY - current.y) / current.k;
 
-            scheduleViewportChange({
-                x: mouseX - worldX * newScale,
-                y: mouseY - worldY * newScale,
-                k: newScale,
-            }, true);
+            scheduleViewportChange(
+                {
+                    x: mouseX - worldX * newScale,
+                    y: mouseY - worldY * newScale,
+                    k: newScale,
+                },
+                true,
+            );
         },
-        [containerRef, scheduleViewportChange],
+        [containerRef, onSelectedImageWheel, scheduleViewportChange],
     );
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -317,7 +357,6 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
             setIsPanning(true);
             document.body.style.cursor = "grabbing";
         }
-
     };
 
     useEffect(() => {
@@ -423,18 +462,21 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
         <div
             ref={containerRef}
             data-canvas-viewport
+            data-popover-anchor-container
             data-canvas-pan-state={isPanning ? "grabbing" : isSpacePressed || !boxSelectEnabled ? "grab" : undefined}
-            className={`relative h-full w-full select-none overflow-hidden touch-none ${isPanning ? "cursor-grabbing" : isSpacePressed || !boxSelectEnabled ? "cursor-grab" : "canvas-cursor-select"}`}
-            style={{
-                background: resolvedAppearance.background,
-                overscrollBehavior: "none",
-                "--canvas-live-x": `${viewport.x}px`,
-                "--canvas-live-y": `${viewport.y}px`,
-                "--canvas-live-scale": viewport.k,
-                "--canvas-live-inverse-scale": 1 / Math.max(viewport.k, 0.05),
-                "--canvas-committed-scale": viewport.k,
-                "--canvas-live-scale-ratio": 1,
-            } as React.CSSProperties}
+            className={`relative h-full w-full select-none overflow-clip touch-none ${isPanning ? "cursor-grabbing" : isSpacePressed || !boxSelectEnabled ? "cursor-grab" : "canvas-cursor-select"}`}
+            style={
+                {
+                    background: resolvedAppearance.background,
+                    overscrollBehavior: "none",
+                    "--canvas-live-x": `${viewport.x}px`,
+                    "--canvas-live-y": `${viewport.y}px`,
+                    "--canvas-live-scale": viewport.k,
+                    "--canvas-live-inverse-scale": 1 / Math.max(viewport.k, 0.05),
+                    "--canvas-committed-scale": viewport.k,
+                    "--canvas-live-scale-ratio": 1,
+                } as React.CSSProperties
+            }
             onPointerDown={handlePointerDown}
             onDoubleClick={(event) => {
                 const target = event.target instanceof Element ? event.target : null;
@@ -474,13 +516,10 @@ export function CanvasViewport({ interactive = true, containerRef, viewport, app
                 onDrop?.(event);
             }}
         >
-            <CanvasGrid appearance={appearance} mode={backgroundMode} />
+            <CanvasGrid appearance={appearance} mode={backgroundMode} viewport={viewport} />
             {graphicsLayer}
-            <div
-                data-canvas-world-layer
-                className="canvas-world-layer absolute origin-top-left"
-            >
-                <div data-canvas-world-raster-layer className="canvas-world-raster-layer absolute origin-top-left">
+            <div data-canvas-world-layer data-popover-anchor-container className="canvas-world-layer absolute origin-top-left">
+                <div data-canvas-world-raster-layer data-popover-anchor-container className="canvas-world-raster-layer absolute origin-top-left">
                     {children}
                 </div>
             </div>
@@ -493,22 +532,32 @@ function isCanvasInternalDragEvent(event: React.DragEvent<HTMLDivElement>) {
     return Boolean(target?.closest(CANVAS_INTERNAL_DRAG_SELECTOR));
 }
 
-export function CanvasGrid({ appearance, mode }: { appearance?: CanvasAppearance; mode: CanvasBackgroundMode }) {
+const CANVAS_GRID_BASE: Record<Exclude<CanvasBackgroundMode, "blank">, number> = { dots: 24, lines: 32 };
+
+export function CanvasGrid({ appearance, mode, viewport }: { appearance?: CanvasAppearance; mode: CanvasBackgroundMode; viewport: ViewportTransform }) {
     const colorTheme = useActiveTheme();
     const gridColor = resolveCanvasGridColor(appearance, colorTheme, mode);
-    const backgroundImage = mode === "dots" ? `radial-gradient(circle, ${gridColor} 0.8px, transparent 1px)` : `linear-gradient(${gridColor} 1px, transparent 1px), linear-gradient(90deg, ${gridColor} 1px, transparent 1px)`;
     if (mode === "blank") return null;
+    const base = CANVAS_GRID_BASE[mode];
+    const backgroundImage = mode === "dots" ? `radial-gradient(circle, ${gridColor} 1px, transparent 1.4px)` : `linear-gradient(${gridColor} 1px, transparent 1px), linear-gradient(90deg, ${gridColor} 1px, transparent 1px)`;
+    // 首帧和提交后的位置由 render 给出；交互期由 applyCanvasLiveViewport 直接写 transform，不触发 React。
+    const { spacing, offsetX, offsetY } = canvasGridMetrics(viewport, base);
 
     return (
         <div
             data-canvas-grid-layer
+            data-canvas-grid-base={base}
+            aria-hidden
             className="pointer-events-none absolute"
             style={{
-                // 装饰网格固定在屏幕坐标，避免缩放时改变密度或产生亚像素位移闪烁。
-                inset: 0,
+                top: -CANVAS_GRID_BLEED,
+                left: -CANVAS_GRID_BLEED,
+                right: 0,
+                bottom: 0,
                 backgroundImage,
-                backgroundSize: "48px 48px",
-                opacity: mode === "dots" ? 0.34 : 0.46,
+                backgroundSize: `${spacing}px ${spacing}px`,
+                transform: `translate3d(${offsetX}px, ${offsetY}px, 0)`,
+                opacity: mode === "dots" ? 0.62 : 0.4,
             }}
         />
     );

@@ -29,7 +29,8 @@ function ResizeEditor({ dataUrl, onClose, onConfirm }: UpscaleDialogProps) {
                     <figcaption className="text-sm text-muted-foreground">{size ? `原图 ${size.width} × ${size.height} px` : error || "正在读取图片…"}</figcaption>
                 </figure>
                 <div className="flex flex-col gap-5">
-                    <label className="flex flex-col gap-2 text-sm">目标长边
+                    <label className="flex flex-col gap-2 text-sm">
+                        目标长边
                         <Select aria-label="目标长边" value={target} onChange={setChosen} options={pixelTargets.map((pixels) => ({ value: pixels, label: `${pixels} px`, disabled: pixels <= edge }))} />
                     </label>
                     <fieldset className="space-y-2">
@@ -41,7 +42,11 @@ function ResizeEditor({ dataUrl, onClose, onConfirm }: UpscaleDialogProps) {
                         </Radio.Group>
                     </fieldset>
                     <output className="text-sm">{output ? `输出 ${output.width} × ${output.height} px` : "等待读取尺寸"}</output>
-                    {error || (size && !ready) ? <p role="alert" className="text-sm text-destructive">{error || (edge >= MAX_UPSCALE_LONG_EDGE ? "图片已达到 4K，无需放大" : "请选择大于原图的目标尺寸")}</p> : null}
+                    {error || (size && !ready) ? (
+                        <p role="alert" className="text-sm text-destructive">
+                            {error || (edge >= MAX_UPSCALE_LONG_EDGE ? "图片已达到 4K，无需放大" : "请选择大于原图的目标尺寸")}
+                        </p>
+                    ) : null}
                 </div>
             </div>
         </AppModal>

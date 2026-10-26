@@ -27,7 +27,19 @@ export async function readAssetPackage(file: File): Promise<Asset[]> {
     const manifestBlob = archive.get("assets.json");
     if (!manifestBlob) throw new Error("素材包缺少 assets.json");
     const manifest: unknown = JSON.parse(await manifestBlob.text());
-    if (!manifest || typeof manifest !== "object" || !("app" in manifest) || manifest.app !== "yingce" || !("version" in manifest) || manifest.version !== 1 || !("assets" in manifest) || !Array.isArray(manifest.assets) || !("files" in manifest) || !Array.isArray(manifest.files)) throw new Error("素材包格式或版本不受支持");
+    if (
+        !manifest ||
+        typeof manifest !== "object" ||
+        !("app" in manifest) ||
+        manifest.app !== "yingce" ||
+        !("version" in manifest) ||
+        manifest.version !== 1 ||
+        !("assets" in manifest) ||
+        !Array.isArray(manifest.assets) ||
+        !("files" in manifest) ||
+        !Array.isArray(manifest.files)
+    )
+        throw new Error("素材包格式或版本不受支持");
     const images = new Set<string>();
     for (const asset of manifest.assets) {
         if (!asset || typeof asset !== "object" || typeof asset.id !== "string" || !asset.data || typeof asset.data !== "object" || typeof asset.kind !== "string") throw new Error("素材包包含无效素材");
@@ -35,7 +47,18 @@ export async function readAssetPackage(file: File): Promise<Asset[]> {
     }
     // Validate the whole manifest before making the first persistent write.
     const writes = manifest.files.map((entry: unknown) => {
-        if (!entry || typeof entry !== "object" || !("storageKey" in entry) || typeof entry.storageKey !== "string" || !entry.storageKey || !("path" in entry) || typeof entry.path !== "string" || !("mimeType" in entry) || typeof entry.mimeType !== "string") throw new Error("素材包文件索引无效");
+        if (
+            !entry ||
+            typeof entry !== "object" ||
+            !("storageKey" in entry) ||
+            typeof entry.storageKey !== "string" ||
+            !entry.storageKey ||
+            !("path" in entry) ||
+            typeof entry.path !== "string" ||
+            !("mimeType" in entry) ||
+            typeof entry.mimeType !== "string"
+        )
+            throw new Error("素材包文件索引无效");
         const blob = archive.get(entry.path);
         if (!blob) throw new Error(`素材包缺少文件：${entry.path}`);
         if ("bytes" in entry && entry.bytes !== blob.size) throw new Error(`素材包文件大小不匹配：${entry.path}`);

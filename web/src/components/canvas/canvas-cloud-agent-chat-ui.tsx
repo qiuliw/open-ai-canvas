@@ -3,7 +3,7 @@ import { Button } from "antd";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { CheckCircle2, ChevronDown, ChevronUp, CircleAlert, CircleDot, Eye, HelpCircle, List, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Sparkles, Wrench, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronUp, CircleAlert, CircleDot, Eye, HelpCircle, List, ListChecks, LoaderCircle, Pencil, Plus, RotateCcw, Sparkles, Undo2, Wrench, XCircle } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { AIMessageMarkdown } from "@/components/ai/ai-message-markdown";
@@ -13,6 +13,7 @@ import { agentToolCategory, agentToolCategoryLabel, agentToolErrorClassLabel, ag
 import { agentOperationCategory, agentOperationFailed, agentOperationSegmentLabel } from "@/lib/canvas/agent-operation-feed";
 import { agentToolRetry, type AgentToolRetryAttempt } from "@/lib/canvas/agent-tool-retry";
 import { agentErrorContent } from "@/lib/canvas/agent-error-presentation";
+import { agentCanvasUndoKey, agentCanvasUndoTarget, type AgentCanvasUndoState, type AgentCanvasUndoTarget } from "@/lib/canvas/agent-canvas-undo";
 import { AgentImagePreview } from "./canvas-cloud-agent-composer";
 
 // 输入区已拆到 canvas-cloud-agent-composer.tsx；附件类型与引用转换在 canvas-cloud-agent-attachments.ts。
@@ -34,9 +35,9 @@ export type CloudAgentFormOption = { id?: string; label: string; detail?: string
 export type CloudAgentFormField = {
     id: string;
     title: string;
-    type: "single_select" | "segmented" | "text" | "textarea" | "model_picker";
+    type: "single_select" | "multi_select" | "segmented" | "text" | "textarea" | "model_picker";
     options?: CloudAgentFormOption[];
-    defaultValue?: string;
+    defaultValue?: string | string[];
     required?: boolean;
     allowCustom?: boolean;
     placeholder?: string;
@@ -54,11 +55,12 @@ export type CloudAgentUserQuestion = {
 export type CloudAgentFormAnswer = {
     type: "form_answer";
     questionId?: string;
-    answers: Record<string, string>;
-    displayAnswers?: Record<string, string>;
+    answers: Record<string, string | string[]>;
+    displayAnswers?: Record<string, string | string[]>;
     fieldTitles?: Record<string, string>;
     skippedFields?: string[];
     useRecommendedDefaults?: boolean;
+    additionalNotes?: string;
 };
 export type CloudAgentChatMessage = {
     id: string;
@@ -84,6 +86,7 @@ export type CloudAgentChatMessage = {
     meta?: string;
     detail?: unknown;
     attachments?: CloudAgentChatAttachment[];
+    canvasReferenceNodeId?: string;
     interjection?: "sent" | "undelivered";
 };
 
@@ -119,10 +122,17 @@ const AGENT_FORM_VALUE_LABELS: Record<string, string> = {
     absurd: "荒诞",
 };
 
-function formAnswerRecord(value: unknown): Record<string, string> | undefined {
+function formAnswerRecord(value: unknown): Record<string, string | string[]> | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-    const entries = Object.entries(value).filter(([, item]) => typeof item === "string" && item.trim());
-    return entries.length ? Object.fromEntries(entries.map(([key, item]) => [key, String(item)])) : undefined;
+    const entries: Record<string, string | string[]> = {};
+    for (const [key, item] of Object.entries(value)) {
+        if (typeof item === "string" && item.trim()) entries[key] = item;
+        if (Array.isArray(item)) {
+            const values = item.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()));
+            if (values.length) entries[key] = values;
+        }
+    }
+    return Object.keys(entries).length ? entries : undefined;
 }
 
 export function parseCloudAgentFormAnswer(value: string): CloudAgentFormAnswer | undefined {
@@ -137,9 +147,13 @@ export function parseCloudAgentFormAnswer(value: string): CloudAgentFormAnswer |
             questionId: typeof record.questionId === "string" ? record.questionId : undefined,
             answers,
             displayAnswers: formAnswerRecord(record.displayAnswers),
-            fieldTitles: formAnswerRecord(record.fieldTitles),
+            fieldTitles:
+                record.fieldTitles && typeof record.fieldTitles === "object" && !Array.isArray(record.fieldTitles)
+                    ? Object.fromEntries(Object.entries(record.fieldTitles).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+                    : undefined,
             skippedFields: Array.isArray(record.skippedFields) ? record.skippedFields.filter((item): item is string => typeof item === "string") : [],
             useRecommendedDefaults: record.useRecommendedDefaults === true,
+            additionalNotes: typeof record.additionalNotes === "string" ? record.additionalNotes : undefined,
         };
     } catch {
         return undefined;
@@ -156,7 +170,7 @@ function agentFormValueLabel(value: string) {
 
 function AgentFormAnswerCard({ answer, theme }: { answer: CloudAgentFormAnswer; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const values = answer.displayAnswers && Object.keys(answer.displayAnswers).length ? answer.displayAnswers : answer.answers;
-    const entries = Object.entries(values).filter(([, value]) => value.trim());
+    const entries = Object.entries(values).filter(([, value]) => (Array.isArray(value) ? value.length > 0 : value.trim()));
     return (
         <div className="agent-form-answer-card" style={{ color: theme.node.text }}>
             <div className="agent-form-answer-heading">已确认创作方向</div>
@@ -166,9 +180,20 @@ function AgentFormAnswerCard({ answer, theme }: { answer: CloudAgentFormAnswer; 
                     {entries.map(([key, value]) => (
                         <div className="agent-form-answer-row" key={key}>
                             <span className="agent-form-answer-label">{agentFormFieldLabel(key, answer.fieldTitles)}</span>
-                            <span className="agent-form-answer-value">{answer.displayAnswers?.[key] || agentFormValueLabel(value)}</span>
+                            <span className="agent-form-answer-value">{answer.displayAnswers?.[key] || (Array.isArray(value) ? value.map(agentFormValueLabel).join("、") : agentFormValueLabel(value))}</span>
                         </div>
                     ))}
+                    {answer.additionalNotes ? (
+                        <div className="agent-form-answer-row">
+                            <span className="agent-form-answer-label">补充说明</span>
+                            <span className="agent-form-answer-value">{answer.additionalNotes}</span>
+                        </div>
+                    ) : null}
+                </div>
+            ) : answer.additionalNotes ? (
+                <div className="agent-form-answer-row">
+                    <span className="agent-form-answer-label">补充说明</span>
+                    <span className="agent-form-answer-value">{answer.additionalNotes}</span>
                 </div>
             ) : (
                 <div className="agent-form-answer-note">已确认，按推荐方案继续</div>
@@ -364,6 +389,8 @@ export function AgentChatMessage({
     onApproveTool,
     onRetry,
     onFocusNode,
+    onUndo,
+    undoStates,
 }: {
     item: CloudAgentChatMessage;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
@@ -374,6 +401,8 @@ export function AgentChatMessage({
     onApproveTool?: (id: string) => void;
     onRetry?: () => void;
     onFocusNode?: (nodeId: string) => void;
+    onUndo?: (target: AgentCanvasUndoTarget) => void;
+    undoStates?: Record<string, AgentCanvasUndoState>;
 }) {
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
@@ -381,6 +410,8 @@ export function AgentChatMessage({
     const formAnswer = item.formAnswer ?? (isUser ? parseCloudAgentFormAnswer(item.text) : undefined);
     const markdownComponents = useMemo(() => createAgentMessageMarkdownComponents(references, onFocusNode), [onFocusNode, references]);
     const agentMarkdownText = rewriteAgentNodeLinks(displayedText, references);
+    const canvasReference = item.canvasReferenceNodeId ? references.find((reference) => reference.nodeId === item.canvasReferenceNodeId) : undefined;
+    const userCanvasMarkdown = canvasReference ? item.text.replace("此图", createAgentNodeLink(canvasReference.nodeId, canvasReference)) : item.text;
     const errorTone = item.errorSeverity === "warning" ? "warning" : "error";
     const color = theme.node.text;
     if (item.reasoning) {
@@ -430,7 +461,7 @@ export function AgentChatMessage({
         if (objectField(item.detail, "status") === "pending") return <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />;
         return (
             <div className="flex min-w-0 items-start">
-                <AgentToolCard title={item.title || "工具调用"} text={item.text} detail={item.detail} theme={theme} references={references} onFocusNode={onFocusNode} />
+                <AgentToolCard title={item.title || "工具调用"} text={item.text} detail={item.detail} theme={theme} references={references} onFocusNode={onFocusNode} onUndo={onUndo} undoStates={undoStates} />
             </div>
         );
     }
@@ -484,6 +515,10 @@ export function AgentChatMessage({
                     <AIMessageMarkdown className="text-left" isStreaming={isStreaming} streamingAnimation="none" components={markdownComponents}>
                         {agentMarkdownText}
                     </AIMessageMarkdown>
+                ) : isUser && canvasReference ? (
+                    <AIMessageMarkdown className="text-left" components={markdownComponents}>
+                        {userCanvasMarkdown}
+                    </AIMessageMarkdown>
                 ) : formAnswer ? (
                     <AgentFormAnswerCard answer={formAnswer} theme={theme} />
                 ) : (
@@ -531,9 +566,9 @@ export function AgentReasoningFeed({ items, theme }: { items: CloudAgentChatMess
 
 /**
  * Agent SSE events contain text chunks. Keep the full text in the message
- * state, but reveal one code point at a time so a chunk never appears as a
- * whole block. The loop continues briefly after the stream ends to drain any
- * text that was buffered by the network.
+ * state, but reveal it in small batches. A fixed one-code-point delay lets a
+ * fast stream build an ever-growing queue, so the batch grows with the
+ * backlog and eventually catches up to the latest text in one render.
  */
 function useTypewriterText(targetText: string, shouldAnimate: boolean) {
     const targetRef = useRef(targetText);
@@ -561,16 +596,21 @@ function useTypewriterText(targetText: string, shouldAnimate: boolean) {
             }
 
             const currentCharacters = Array.from(visibleRef.current);
-            if (currentCharacters.length >= targetCharacters.length) {
+            const pendingCharacters = targetCharacters.length - currentCharacters.length;
+            if (pendingCharacters <= 0) {
                 runningRef.current = false;
                 timerRef.current = null;
                 return;
             }
 
-            const nextText = targetCharacters.slice(0, currentCharacters.length + 1).join("");
+            // Normal output remains visibly animated. Once stream chunks start
+            // outrunning the renderer, increase the batch instead of queuing
+            // every code point behind a fixed 16ms delay.
+            const revealCount = pendingCharacters > 384 ? pendingCharacters : pendingCharacters > 192 ? 32 : pendingCharacters > 96 ? 16 : pendingCharacters > 24 ? 8 : 3;
+            const nextText = targetCharacters.slice(0, currentCharacters.length + revealCount).join("");
             visibleRef.current = nextText;
             setVisibleText(nextText);
-            timerRef.current = window.setTimeout(step, 16);
+            timerRef.current = window.setTimeout(step, 12);
         };
 
         step();
@@ -733,6 +773,8 @@ export function AgentToolCard({
     theme,
     references = [],
     onFocusNode,
+    onUndo,
+    undoStates,
 }: {
     title: string;
     text: string;
@@ -740,6 +782,8 @@ export function AgentToolCard({
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     references?: CanvasResourceReference[];
     onFocusNode?: (nodeId: string) => void;
+    onUndo?: (target: AgentCanvasUndoTarget) => void;
+    undoStates?: Record<string, AgentCanvasUndoState>;
 }) {
     const state = toolCardState(title, text, detail);
     const toolName = agentToolName(title, detail);
@@ -747,6 +791,8 @@ export function AgentToolCard({
     const categoryLabel = agentToolCategoryLabel(toolName, category);
     const summary = friendlyAgentToolSummary(toolName, text, detail);
     const actions = agentCanvasActions(toolName, detail, references);
+    const undoTarget = agentCanvasUndoTarget(detail);
+    const undoState: AgentCanvasUndoState | undefined = objectField(detail, "undoStatus") === "undone" ? { status: "done" } : undoTarget ? undoStates?.[agentCanvasUndoKey(undoTarget)] : undefined;
     const isNodeRead = toolName === "canvas_get_state" && category === "read";
     const [readExpanded, setReadExpanded] = useState(false);
     const visibleActions = actions.slice(0, isNodeRead && !readExpanded ? 1 : 8);
@@ -829,6 +875,30 @@ export function AgentToolCard({
                         任务 ID：{String(objectField(objectField(detail, "result"), "taskId"))}
                     </span>
                 ) : null}
+                {undoState?.status === "error" ? (
+                    <span className="mt-1 block text-[11px] text-[var(--status-danger)]" role="alert">
+                        撤销失败：{undoState.error || "请检查画布状态后重试"}
+                    </span>
+                ) : null}
+                {undoState?.status === "done" ? (
+                    <span className="mt-1 block text-[11px] text-[var(--status-success)]" role="status">
+                        此步骤已撤销
+                    </span>
+                ) : null}
+                {undoTarget && onUndo && undoState?.status !== "done" ? (
+                    <Button
+                        type="text"
+                        size="small"
+                        className="mt-1 !h-7 !px-1.5"
+                        aria-label="撤销本次画布写入"
+                        icon={undoState?.status === "pending" ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Undo2 className="size-3.5" />}
+                        loading={undoState?.status === "pending"}
+                        disabled={undoState?.status === "pending"}
+                        onClick={() => onUndo?.(undoTarget)}
+                    >
+                        {undoState?.status === "pending" ? "撤销中" : undoState?.status === "error" ? "重新撤销" : "撤销这一步"}
+                    </Button>
+                ) : null}
             </div>
             {state.label === "已完成" ? <span className="sr-only">已完成</span> : null}
         </div>
@@ -850,12 +920,16 @@ export function AgentOperationFeed({
     theme,
     references = [],
     onFocusNode,
+    onUndo,
+    undoStates,
     live = false,
 }: {
     items: CloudAgentChatMessage[];
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
     references?: CanvasResourceReference[];
     onFocusNode?: (nodeId: string) => void;
+    onUndo?: (target: AgentCanvasUndoTarget) => void;
+    undoStates?: Record<string, AgentCanvasUndoState>;
     live?: boolean;
 }) {
     const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
@@ -908,7 +982,7 @@ export function AgentOperationFeed({
             {expanded ? (
                 <div id={listId} className="agent-operation-list">
                     {items.map((item) => (
-                        <AgentChatMessage key={item.id} item={item} theme={theme} references={references} onFocusNode={onFocusNode} />
+                        <AgentChatMessage key={item.id} item={item} theme={theme} references={references} onFocusNode={onFocusNode} onUndo={onUndo} undoStates={undoStates} />
                     ))}
                 </div>
             ) : null}
@@ -983,31 +1057,55 @@ export function AgentPlanBar({
     );
 }
 
+const EMPTY_QUESTION_FIELDS: CloudAgentFormField[] = [];
+
 export function AgentQuestionBar({ question, theme, onAnswer, disabled = false }: { question: CloudAgentUserQuestion; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onAnswer: (answer: string) => void; disabled?: boolean }) {
-    const fields = question.fields || [];
+    const fields = question.fields || EMPTY_QUESTION_FIELDS;
     const isForm = question.kind === "form" || fields.length > 0;
-    const fieldDefaultValue = (field: CloudAgentFormField) => field.defaultValue || field.options?.find((option) => option.recommended)?.id || field.options?.find((option) => option.recommended)?.label || "";
-    const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((field) => [field.id, fieldDefaultValue(field)])));
+    const fieldDefaultValue = (field: CloudAgentFormField): string | string[] => {
+        if (field.defaultValue !== undefined) {
+            if (field.type === "multi_select") return Array.isArray(field.defaultValue) ? field.defaultValue : [field.defaultValue];
+            return Array.isArray(field.defaultValue) ? field.defaultValue[0] || "" : field.defaultValue;
+        }
+        const recommended = field.options?.filter((option) => option.recommended).map((option) => option.id || option.label) || [];
+        if (field.type === "multi_select") return recommended;
+        return recommended[0] || "";
+    };
+    const [values, setValues] = useState<Record<string, string | string[]>>(() => Object.fromEntries(fields.map((field) => [field.id, fieldDefaultValue(field)])));
     const [customFields, setCustomFields] = useState<Record<string, boolean>>({});
+    const [additionalNotes, setAdditionalNotes] = useState("");
     const [validation, setValidation] = useState("");
 
     useEffect(() => {
         setValues(Object.fromEntries(fields.map((field) => [field.id, fieldDefaultValue(field)])));
         setCustomFields({});
+        setAdditionalNotes("");
         setValidation("");
     }, [question.questionId, fields]);
 
     const submitForm = (useDefaults = false) => {
-        const answers = useDefaults ? Object.fromEntries(fields.map((field) => [field.id, field.defaultValue || ""])) : values;
-        const missing = fields.find((field) => (field.required && !String(answers[field.id] || "").trim()) || (field.required && answers[field.id] === "other"));
+        const answers = useDefaults ? Object.fromEntries(fields.map((field) => [field.id, fieldDefaultValue(field)])) : values;
+        const missing = fields.find((field) => {
+            const value = answers[field.id];
+            const empty = Array.isArray(value) ? value.length === 0 : !String(value || "").trim();
+            return field.required && (empty || value === "other");
+        });
         if (missing) {
             setValidation(`请填写“${missing.title}”`);
             return;
         }
         setValidation("");
-        const displayAnswers: Record<string, string> = {};
+        const displayAnswers: Record<string, string | string[]> = {};
         for (const field of fields) {
-            const value = String(answers[field.id] || "").trim();
+            const rawValue = answers[field.id];
+            if (Array.isArray(rawValue)) {
+                const selected = rawValue.map((value) => String(value).trim()).filter(Boolean);
+                if (selected.length) {
+                    displayAnswers[field.id] = selected.map((value) => field.options?.find((item) => (item.id || item.label) === value)?.label || value);
+                }
+                continue;
+            }
+            const value = String(rawValue || "").trim();
             if (!value || value === "other") continue;
             const option = field.options?.find((item) => (item.id || item.label) === value);
             displayAnswers[field.id] = option?.label || value;
@@ -1022,6 +1120,7 @@ export function AgentQuestionBar({ question, theme, onAnswer, disabled = false }
                 fieldTitles,
                 skippedFields: fields.filter((field) => !String(answers[field.id] || "").trim()).map((field) => field.id),
                 useRecommendedDefaults: useDefaults,
+                additionalNotes: additionalNotes.trim() || undefined,
             }),
         );
     };
@@ -1030,7 +1129,11 @@ export function AgentQuestionBar({ question, theme, onAnswer, disabled = false }
         event.stopPropagation();
     };
     const updateValue = (field: CloudAgentFormField, value: string) => {
-        setValues((current) => ({ ...current, [field.id]: value }));
+        setValues((current) => {
+            if (field.type !== "multi_select") return { ...current, [field.id]: value };
+            const selected = Array.isArray(current[field.id]) ? (current[field.id] as string[]) : [];
+            return { ...current, [field.id]: selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value] };
+        });
         if (field.allowCustom && value === "other") setCustomFields((current) => ({ ...current, [field.id]: true }));
     };
 
@@ -1080,10 +1183,11 @@ export function AgentQuestionBar({ question, theme, onAnswer, disabled = false }
                                             onPointerDown={stop}
                                         />
                                     ) : (
-                                        <div className="agent-question-options" role="radiogroup" aria-label={field.title}>
+                                        <div className="agent-question-options" role={field.type === "multi_select" ? "group" : "radiogroup"} aria-label={field.title}>
                                             {options.map((option) => {
                                                 const optionId = option.id || option.label;
-                                                const selected = values[field.id] === optionId;
+                                                const selectedValues = values[field.id];
+                                                const selected = field.type === "multi_select" ? Array.isArray(selectedValues) && selectedValues.includes(optionId) : selectedValues === optionId;
                                                 return (
                                                     <button
                                                         key={optionId}
@@ -1121,6 +1225,22 @@ export function AgentQuestionBar({ question, theme, onAnswer, disabled = false }
                             </div>
                         );
                     })}
+                </div>
+                <div className="agent-question-field px-3 pb-2">
+                    <label className="agent-question-field-label" htmlFor="agent-question-additional-notes">
+                        补充说明
+                    </label>
+                    <textarea
+                        id="agent-question-additional-notes"
+                        rows={2}
+                        value={additionalNotes}
+                        placeholder="还有需要特别说明的场景、人物、节奏或限制吗？"
+                        disabled={disabled}
+                        className="agent-question-input agent-question-textarea"
+                        onChange={(event) => setAdditionalNotes(event.target.value)}
+                        onMouseDown={stop}
+                        onPointerDown={stop}
+                    />
                 </div>
                 {validation ? <div className="agent-question-validation px-3 pb-1 text-[10px]">{validation}</div> : null}
                 <div className="agent-question-actions px-3 pb-2.5">

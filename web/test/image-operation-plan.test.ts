@@ -34,17 +34,19 @@ describe("图片工具像素合同", () => {
     });
     test("锁定比例时八个手柄在各种拖动下都保持比例与图内边界", () => {
         const box = { x: 0.1, y: 0.2, width: 0.6, height: 0.4 };
-        for (const x of [-1, 0, 1] as const) for (const y of [-1, 0, 1] as const) {
-            if (!x && !y) continue;
-            for (const dx of [-3, -0.1, 0, 0.1, 3]) for (const dy of [-3, -0.1, 0, 0.1, 3]) {
-                const next = resizeSelection(box, [x, y] as CropGrip, dx, dy, true);
-                expect(next.width / next.height).toBeCloseTo(1.5, 8);
-                expect(next.x).toBeGreaterThanOrEqual(-1e-12);
-                expect(next.y).toBeGreaterThanOrEqual(-1e-12);
-                expect(next.x + next.width).toBeLessThanOrEqual(1 + 1e-12);
-                expect(next.y + next.height).toBeLessThanOrEqual(1 + 1e-12);
+        for (const x of [-1, 0, 1] as const)
+            for (const y of [-1, 0, 1] as const) {
+                if (!x && !y) continue;
+                for (const dx of [-3, -0.1, 0, 0.1, 3])
+                    for (const dy of [-3, -0.1, 0, 0.1, 3]) {
+                        const next = resizeSelection(box, [x, y] as CropGrip, dx, dy, true);
+                        expect(next.width / next.height).toBeCloseTo(1.5, 8);
+                        expect(next.x).toBeGreaterThanOrEqual(-1e-12);
+                        expect(next.y).toBeGreaterThanOrEqual(-1e-12);
+                        expect(next.x + next.width).toBeLessThanOrEqual(1 + 1e-12);
+                        expect(next.y + next.height).toBeLessThanOrEqual(1 + 1e-12);
+                    }
             }
-        }
     });
     test("极窄比例切换后仍可自由拖动手柄", () => {
         const box = selectAspect({ x: 0.1, y: 0.1, width: 0.8, height: 0.8 }, 0.02);

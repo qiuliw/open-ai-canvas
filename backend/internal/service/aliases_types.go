@@ -2,7 +2,16 @@ package service
 
 import "yingce/backend/internal/app"
 
+type AgentAvatarBundleManifest = app.AgentAvatarBundleManifest
+type AgentAvatarBundleImport = app.AgentAvatarBundleImport
+
+const (
+	WorkbenchKindImage = app.WorkbenchKindImage
+	WorkbenchKindVideo = app.WorkbenchKindVideo
+)
+
 type (
+	BindProjectAssetImageRequest           = app.BindProjectAssetImageRequest
 	PaymentOrderQuery                      = app.PaymentOrderQuery
 	PaymentReconciliationQuery             = app.PaymentReconciliationQuery
 	CloudAgentRequest                      = app.CloudAgentRequest
@@ -20,6 +29,10 @@ type (
 	AgentMemorySettingRequest              = app.AgentMemorySettingRequest
 	AgentMemoryCompactView                 = app.AgentMemoryCompactView
 	AgentMemoryCompactSummary              = app.AgentMemoryCompactSummary
+	AgentMemoryProposalDecision            = app.AgentMemoryProposalDecision
+	AgentMemoryRevisionRestore             = app.AgentMemoryRevisionRestore
+	AgentMemoryProposalView                = app.AgentMemoryProposalView
+	AgentMemoryRevisionView                = app.AgentMemoryRevisionView
 	APICallLogPage                         = app.APICallLogPage
 	APICallLogQuery                        = app.APICallLogQuery
 	AccountFileStorageUsage                = app.AccountFileStorageUsage
@@ -90,6 +103,8 @@ type (
 	BulkDisableUsersResult                 = app.BulkDisableUsersResult
 	CanvasLibraryPage                      = app.CanvasLibraryPage
 	CanvasLibrarySummary                   = app.CanvasLibrarySummary
+	CanvasOperationsRequest                = app.CanvasOperationsRequest
+	CanvasEditLeaseRequest                 = app.CanvasEditLeaseRequest
 	CanvasHistoryList                      = app.CanvasHistoryList
 	CanvasShareRequest                     = app.CanvasShareRequest
 	CanvasShareStatus                      = app.CanvasShareStatus
@@ -108,6 +123,10 @@ type (
 	ChannelOrderItem                       = app.ChannelOrderItem
 	ChannelOrderRequest                    = app.ChannelOrderRequest
 	ChannelRequest                         = app.ChannelRequest
+	SystemChannelExport                    = app.SystemChannelExport
+	SystemChannelImportResult              = app.SystemChannelImportResult
+	ProviderCatalogVerifyRequest           = app.ProviderCatalogVerifyRequest
+	ProviderCatalogInstallRequest          = app.ProviderCatalogInstallRequest
 	CharacterAssetSummary                  = app.CharacterAssetSummary
 	CharacterCardSummary                   = app.CharacterCardSummary
 	CharacterRepresentationInput           = app.CharacterRepresentationInput
@@ -139,6 +158,7 @@ type (
 	CreationRunOutput                      = app.CreationRunOutput
 	CreationSubmissionOutput               = app.CreationSubmissionOutput
 	CreditPolicy                           = app.CreditPolicy
+	BillingAutoRefundSetting               = app.BillingAutoRefundSetting
 	DiagnosticBundle                       = app.DiagnosticBundle
 	DiagnosticClientEvent                  = app.DiagnosticClientEvent
 	DiagnosticExportRequest                = app.DiagnosticExportRequest
@@ -342,6 +362,11 @@ type (
 	UpdateProjectUnitRequest               = app.UpdateProjectUnitRequest
 	UpdateUserRequest                      = app.UpdateUserRequest
 	UpdateWorkflowStepRequest              = app.UpdateWorkflowStepRequest
+	WorkbenchToolInput                     = app.WorkbenchToolInput
+	WorkbenchPresetInput                   = app.WorkbenchPresetInput
+	WorkbenchToolView                      = app.WorkbenchToolView
+	WorkbenchPresetView                    = app.WorkbenchPresetView
+	WorkbenchTaskInput                     = app.WorkbenchTaskInput
 	UserAnnouncementFeed                   = app.UserAnnouncementFeed
 	UserAssetPage                          = app.UserAssetPage
 	UserAssetPageFilter                    = app.UserAssetPageFilter

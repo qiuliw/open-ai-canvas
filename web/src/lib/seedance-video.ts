@@ -5,23 +5,44 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
 // Existing channel contract values; these are not a claim about every provider's current limits.
 export const SEEDANCE_REFERENCE_LIMITS = { images: 9, videos: 3, audios: 3, imageMaxBytes: 30 * 1048576, videoMaxBytes: 50 * 1048576, audioMaxBytes: 15 * 1048576 };
-export const seedanceResolutionOptions = [{ label: "480P", value: "480p" }, { label: "720P", value: "720p" }, { label: "1080P", value: "1080p" }] as const;
+export const seedanceResolutionOptions = [
+    { label: "480P", value: "480p" },
+    { label: "720P", value: "720p" },
+    { label: "1080P", value: "1080p" },
+] as const;
 export const seedanceRatioOptions = [
-    { label: "横屏", value: "16:9" }, { label: "竖屏", value: "9:16" }, { label: "方形", value: "1:1" },
-    { label: "标准横屏", value: "4:3" }, { label: "标准竖屏", value: "3:4" }, { label: "宽银幕", value: "21:9" }, { label: "自适应", value: "adaptive" },
+    { label: "横屏", value: "16:9" },
+    { label: "竖屏", value: "9:16" },
+    { label: "方形", value: "1:1" },
+    { label: "标准横屏", value: "4:3" },
+    { label: "标准竖屏", value: "3:4" },
+    { label: "宽银幕", value: "21:9" },
+    { label: "自适应", value: "adaptive" },
 ] as const;
 export const seedanceDurationOptions = VIDEO_DURATION_OPTIONS;
 
 const rasterRows: Record<string, readonly string[]> = {
-    "16:9": ["864x496", "1280x720", "1920x1080"], "4:3": ["752x560", "1112x834", "1664x1248"],
-    "1:1": ["640x640", "960x960", "1440x1440"], "3:4": ["560x752", "834x1112", "1248x1664"],
-    "9:16": ["496x864", "720x1280", "1080x1920"], "21:9": ["992x432", "1470x630", "2206x946"],
+    "16:9": ["864x496", "1280x720", "1920x1080"],
+    "4:3": ["752x560", "1112x834", "1664x1248"],
+    "1:1": ["640x640", "960x960", "1440x1440"],
+    "3:4": ["560x752", "834x1112", "1248x1664"],
+    "9:16": ["496x864", "720x1280", "1080x1920"],
+    "21:9": ["992x432", "1470x630", "2206x946"],
 };
-const ratios = Object.keys(rasterRows).map((label) => { const [w, h] = label.split(":").map(Number); return { label, ratio: w / h }; });
+const ratios = Object.keys(rasterRows).map((label) => {
+    const [w, h] = label.split(":").map(Number);
+    return { label, ratio: w / h };
+});
 
-export function isSeedanceVideoModel(model: string): boolean { return /seedance/i.test(model); }
-export function isSeedanceFastModel(model: string): boolean { return isSeedanceVideoModel(model) && /fast/i.test(model); }
-export function isArkPlanBaseUrl(baseUrl: string): boolean { return /\/api\/plan\/v3/i.test(baseUrl); }
+export function isSeedanceVideoModel(model: string): boolean {
+    return /seedance/i.test(model);
+}
+export function isSeedanceFastModel(model: string): boolean {
+    return isSeedanceVideoModel(model) && /fast/i.test(model);
+}
+export function isArkPlanBaseUrl(baseUrl: string): boolean {
+    return /\/api\/plan\/v3/i.test(baseUrl);
+}
 
 export function isSeedanceVideoConfig(config: AiConfig | Pick<AiConfig, "model" | "videoModel" | "baseUrl">): boolean {
     const request = "channels" in config ? resolveModelRequestConfig(config, config.model || config.videoModel) : config;
@@ -39,7 +60,9 @@ export function normalizeSeedanceResolution(value: string, model = ""): string {
     const supported = isSeedanceFastModel(model) ? ["480p", "720p"] : ["480p", "720p", "1080p", "2160p"];
     return supported.includes(requested) ? requested : "720p";
 }
-export function normalizeSeedanceDuration(value: string): number { return +normalizeVideoDuration(value); }
+export function normalizeSeedanceDuration(value: string): number {
+    return +normalizeVideoDuration(value);
+}
 
 export function normalizeSeedanceRatio(value: string): string {
     if (Object.hasOwn(rasterRows, value)) return value;
@@ -50,7 +73,10 @@ export function normalizeSeedanceRatio(value: string): string {
     let distance = Infinity;
     for (const entry of ratios) {
         const next = Math.abs(entry.ratio - requested);
-        if (next < distance) { distance = next; nearest = entry; }
+        if (next < distance) {
+            distance = next;
+            nearest = entry;
+        }
     }
     return nearest.label;
 }
@@ -61,11 +87,15 @@ export function seedancePixelLabel(resolution: string, ratio: string): string {
     const column = ["480p", "720p", "1080p"].indexOf(normalizeSeedanceResolution(resolution));
     return column < 0 ? "" : rasterRows[aspect]?.[column] || "";
 }
-export function boolConfig(value: string | undefined, fallback: boolean): boolean { return value === "true" || (value !== "false" && fallback); }
-export function seedanceReferenceLabel(kind: "image" | "video" | "audio", index: number): string {
-    return `${({ image: "图片", video: "视频", audio: "音频" })[kind]}${index + 1}`;
+export function boolConfig(value: string | undefined, fallback: boolean): boolean {
+    return value === "true" || (value !== "false" && fallback);
 }
-export function buildSeedancePromptText(prompt: string, _images: ReferenceImage[], _videos: ReferenceVideo[], _audios: ReferenceAudio[]): string { return prompt.trim(); }
+export function seedanceReferenceLabel(kind: "image" | "video" | "audio", index: number): string {
+    return `${{ image: "图片", video: "视频", audio: "音频" }[kind]}${index + 1}`;
+}
+export function buildSeedancePromptText(prompt: string, _images: ReferenceImage[], _videos: ReferenceVideo[], _audios: ReferenceAudio[]): string {
+    return prompt.trim();
+}
 
 type VideoRule = { valid: (video: ReferenceVideo) => boolean; message: string };
 const videoRules: VideoRule[] = [

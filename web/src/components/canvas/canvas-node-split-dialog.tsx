@@ -29,8 +29,12 @@ function SplitEditor({ dataUrl, onClose, onConfirm }: SplitDialogProps) {
                     <div className="relative max-w-full overflow-hidden">
                         <img alt="待切分图片" src={dataUrl} draggable={false} className="block max-h-[340px] max-w-full object-contain" />
                         <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                            {Array.from({ length: grid.columns - 1 }, (_, i) => <line key={`v${i}`} x1={(100 * (i + 1)) / grid.columns} x2={(100 * (i + 1)) / grid.columns} y1={0} y2={100} stroke="white" strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
-                            {Array.from({ length: grid.rows - 1 }, (_, i) => <line key={`h${i}`} y1={(100 * (i + 1)) / grid.rows} y2={(100 * (i + 1)) / grid.rows} x1={0} x2={100} stroke="white" strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
+                            {Array.from({ length: grid.columns - 1 }, (_, i) => (
+                                <line key={`v${i}`} x1={(100 * (i + 1)) / grid.columns} x2={(100 * (i + 1)) / grid.columns} y1={0} y2={100} stroke="white" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                            ))}
+                            {Array.from({ length: grid.rows - 1 }, (_, i) => (
+                                <line key={`h${i}`} y1={(100 * (i + 1)) / grid.rows} y2={(100 * (i + 1)) / grid.rows} x1={0} x2={100} stroke="white" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                            ))}
                         </svg>
                     </div>
                     <figcaption className="text-sm text-muted-foreground">{size ? `${size.width} × ${size.height} px` : error || "正在读取图片…"}</figcaption>
@@ -43,7 +47,11 @@ function SplitEditor({ dataUrl, onClose, onConfirm }: SplitDialogProps) {
                         </label>
                     ))}
                     <output className="text-sm text-muted-foreground">{previewSize ? `每块约 ${previewSize.width} × ${previewSize.height} px；边缘像素会完整保留。` : "等待有效图片尺寸"}</output>
-                    {error || (size && !valid) ? <p role="alert" className="text-sm text-destructive">{error || "行列数超过图片像素尺寸，请减少切分数量"}</p> : null}
+                    {error || (size && !valid) ? (
+                        <p role="alert" className="text-sm text-destructive">
+                            {error || "行列数超过图片像素尺寸，请减少切分数量"}
+                        </p>
+                    ) : null}
                 </div>
             </div>
         </AppModal>

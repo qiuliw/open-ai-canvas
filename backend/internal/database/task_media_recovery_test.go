@@ -1,8 +1,8 @@
 package database
 
 import (
-	"yingce/backend/internal/model"
 	"testing"
+	"yingce/backend/internal/model"
 )
 
 func TestTaskMediaRecoveryMigrationPreservesHistoricalTasks(t *testing.T) {

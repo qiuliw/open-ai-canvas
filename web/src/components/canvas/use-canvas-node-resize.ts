@@ -1,6 +1,6 @@
 import { useEffect, useRef, type PointerEvent } from "react";
 import type { CanvasNodeData, Position } from "@/types/canvas";
-import { getNodeMinSize, shouldKeepAspectRatio } from "@/lib/canvas/node-registry";
+import { getNodeResizeMinSize, shouldKeepAspectRatio } from "@/lib/canvas/node-registry";
 import { solveNodeResize, type NodeResizeCorner } from "@/lib/canvas/node-resize-geometry";
 
 type ResizeCallback = (id: string, width: number, height: number, position?: Position) => void;
@@ -23,10 +23,14 @@ export function useCanvasNodeResize(node: CanvasNodeData, scale: number, minimum
         const pointer = event.pointerId;
         const origin = { x: event.clientX, y: event.clientY };
         let previous = origin;
-        const minimum = getNodeMinSize(node.type);
+        const minimum = getNodeResizeMinSize(node);
         const snapshot = {
-            position: { ...node.position }, width: node.width, height: node.height, corner,
-            minimumWidth: minimum.width, minimumHeight: minimumHeight ?? minimum.height,
+            position: { ...node.position },
+            width: node.width,
+            height: node.height,
+            corner,
+            minimumWidth: minimum.width,
+            minimumHeight: minimumHeight ?? minimum.height,
             ratio: shouldKeepAspectRatio(node) ? (node.metadata?.naturalWidth || node.width) / (node.metadata?.naturalHeight || node.height || 1) : undefined,
         };
         const listeners = new AbortController();
@@ -43,12 +47,32 @@ export function useCanvasNodeResize(node: CanvasNodeData, scale: number, minimum
         };
         target.setPointerCapture(pointer);
         target.addEventListener("pointermove", move, { signal: listeners.signal });
-        target.addEventListener("pointerup", (next) => {
-            if (next.pointerId !== pointer) return;
-            try { move(next); } finally { stop(); }
-        }, { signal: listeners.signal });
-        target.addEventListener("pointercancel", (next) => { if (next.pointerId === pointer) stop(); }, { signal: listeners.signal });
-        target.addEventListener("lostpointercapture", (next) => { if (next.pointerId === pointer) stop(); }, { signal: listeners.signal });
+        target.addEventListener(
+            "pointerup",
+            (next) => {
+                if (next.pointerId !== pointer) return;
+                try {
+                    move(next);
+                } finally {
+                    stop();
+                }
+            },
+            { signal: listeners.signal },
+        );
+        target.addEventListener(
+            "pointercancel",
+            (next) => {
+                if (next.pointerId === pointer) stop();
+            },
+            { signal: listeners.signal },
+        );
+        target.addEventListener(
+            "lostpointercapture",
+            (next) => {
+                if (next.pointerId === pointer) stop();
+            },
+            { signal: listeners.signal },
+        );
         window.addEventListener("blur", stop, { signal: listeners.signal });
         dispose.current = stop;
     };

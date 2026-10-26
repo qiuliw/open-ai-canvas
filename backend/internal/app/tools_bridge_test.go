@@ -1,9 +1,9 @@
 package app
 
 import (
-	"yingce/backend/internal/model"
 	"strings"
 	"testing"
+	"yingce/backend/internal/model"
 )
 
 func TestToolPreviewOwnershipAndResourceDeletionGuard(t *testing.T) {

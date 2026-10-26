@@ -27,8 +27,12 @@ func Models() []any {
 		&model.AgentProfile{},
 		&model.AgentLesson{},
 		&model.AgentMemorySetting{},
+		&model.AgentMemoryProposal{},
+		&model.AgentMemoryRevision{},
 		&model.User{},
+		&model.UserAvatar{},
 		&model.AuthSession{},
+		&model.LoginLog{},
 		&model.UserIdentity{},
 		&model.OAuthState{},
 		&model.EmailVerificationCode{},
@@ -103,6 +107,10 @@ func Models() []any {
 		&model.CanvasProject{},
 		&model.CanvasSnapshot{},
 		&model.CanvasSnapshotResource{},
+		&model.CanvasMutationReceipt{},
+		&model.CanvasEditLease{},
+		&model.WorkbenchTool{},
+		&model.WorkbenchPreset{},
 		&model.CanvasShare{},
 		&model.PromptTemplate{},
 		&model.UserPromptCustomization{},
@@ -115,6 +123,7 @@ func Models() []any {
 		&model.TaskTextDelta{},
 		&model.TaskLog{},
 		&model.Result{},
+		&model.UserFeedback{},
 	}
 }
 

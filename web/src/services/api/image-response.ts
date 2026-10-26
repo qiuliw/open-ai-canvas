@@ -1,16 +1,13 @@
 import axios from "axios";
 import { nanoid } from "nanoid";
 import { consumeJsonEvents } from "@/lib/json-event-stream";
-import type {
-    ChatCompletionPayload, ChatCompletionStreamState, GeminiPart, GeminiPayload, GeminiStreamState,
-    ImageApiResponse, ResponseApiPayload, ResponseStreamState, ResponseToolCall, ToolResponseResult,
-} from "@/services/api/image-contracts";
+import type { ChatCompletionPayload, ChatCompletionStreamState, GeminiPart, GeminiPayload, GeminiStreamState, ImageApiResponse, ResponseApiPayload, ResponseStreamState, ResponseToolCall, ToolResponseResult } from "@/services/api/image-contracts";
 
 type TextSink = (text: string) => void;
 type TextState = { text: string; reasoning: string };
 
 function record(value: unknown): Record<string, unknown> {
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function text(value: unknown): string {
@@ -137,16 +134,20 @@ export async function readFetchError(response: Response, fallback: string) {
     const status = readStatusError(response.status, fallback);
     if (!body) return status;
     let payload: unknown;
-    try { payload = JSON.parse(body); } catch { return body.slice(0, 300) || status; }
+    try {
+        payload = JSON.parse(body);
+    } catch {
+        return body.slice(0, 300) || status;
+    }
     return responseErrorMessage(payload) || status;
 }
 
 export async function readJsonPayload<T>(response: Response, fallback: string): Promise<T> {
     const body = await response.text();
-    try { return JSON.parse(body) as T; } catch {
-        const detail = /^\s*(?:<!doctype|<html)/i.test(body)
-            ? "后端代理返回了前端网页，请检查 VITE_CANVAS_BACKEND_URL 和反向代理配置"
-            : `${fallback}：接口没有返回有效 JSON`;
+    try {
+        return JSON.parse(body) as T;
+    } catch {
+        const detail = /^\s*(?:<!doctype|<html)/i.test(body) ? "后端代理返回了前端网页，请检查 VITE_CANVAS_BACKEND_URL 和反向代理配置" : `${fallback}：接口没有返回有效 JSON`;
         throw new Error(detail);
     }
 }
@@ -165,54 +166,69 @@ const responseChannels: Record<string, keyof TextState> = {
 };
 
 export function consumeResponseStreamText(state: ResponseStreamState, chunk: string, onDelta?: TextSink, onReasoning?: TextSink, flush = false) {
-    consumeJsonEvents(state, chunk, (payload) => {
-        const event = record(payload);
-        const failure = responseErrorMessage(event);
-        if (failure) state.error = failure;
-        const type = text(event.type);
-        const separator = type.lastIndexOf(".");
-        const field = Object.hasOwn(responseChannels, type.slice(0, separator)) ? responseChannels[type.slice(0, separator)] : undefined;
-        const action = type.slice(separator + 1);
-        if (field && (action === "delta" || action === "done")) {
-            updateText(state, field, action === "done" ? event.text : event.delta, field === "text" ? onDelta : onReasoning, action === "done");
-        }
-        if (type === "response.completed" && event.response !== null && typeof event.response === "object" && !Array.isArray(event.response)) {
-            state.payload = event.response as ResponseApiPayload;
-        } else if (Array.isArray(event.output)) state.payload = event as ResponseApiPayload;
-    }, flush);
+    consumeJsonEvents(
+        state,
+        chunk,
+        (payload) => {
+            const event = record(payload);
+            const failure = responseErrorMessage(event);
+            if (failure) state.error = failure;
+            const type = text(event.type);
+            const separator = type.lastIndexOf(".");
+            const field = Object.hasOwn(responseChannels, type.slice(0, separator)) ? responseChannels[type.slice(0, separator)] : undefined;
+            const action = type.slice(separator + 1);
+            if (field && (action === "delta" || action === "done")) {
+                updateText(state, field, action === "done" ? event.text : event.delta, field === "text" ? onDelta : onReasoning, action === "done");
+            }
+            if (type === "response.completed" && event.response !== null && typeof event.response === "object" && !Array.isArray(event.response)) {
+                state.payload = event.response as ResponseApiPayload;
+            } else if (Array.isArray(event.output)) state.payload = event as ResponseApiPayload;
+        },
+        flush,
+    );
 }
 
 export function consumeChatCompletionStreamText(state: ChatCompletionStreamState, chunk: string, onDelta?: TextSink, onReasoning?: TextSink, flush = false) {
-    consumeJsonEvents(state, chunk, (payload) => {
-        const event = record(payload);
-        const failure = responseErrorMessage(event);
-        if (failure) state.error = failure;
-        const first = Array.isArray(event.choices) ? record(event.choices[0]) : {};
-        const delta = record(first.delta);
-        updateText(state, "text", delta.content, onDelta);
-        const reasoning = text(delta.reasoning_content) || text(delta.reasoning) || text(delta.reasoning_text);
-        if (reasoning) updateText(state, "reasoning", reasoning, onReasoning);
-        if (!Array.isArray(delta.tool_calls)) return;
-        for (const [fallback, raw] of delta.tool_calls.entries()) {
-            if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
-            const call = record(raw);
-            const index = typeof call.index === "number" ? call.index : fallback;
-            const previous = state.toolCalls.get(index);
-            const fn = record(call.function);
-            state.toolCalls.set(index, {
-                id: text(call.id) || previous?.id || "",
-                name: text(fn.name) || previous?.name || "",
-                arguments: (previous?.arguments || "") + text(fn.arguments),
-            });
-        }
-    }, flush);
+    consumeJsonEvents(
+        state,
+        chunk,
+        (payload) => {
+            const event = record(payload);
+            const failure = responseErrorMessage(event);
+            if (failure) state.error = failure;
+            const first = Array.isArray(event.choices) ? record(event.choices[0]) : {};
+            const delta = record(first.delta);
+            updateText(state, "text", delta.content, onDelta);
+            const reasoning = text(delta.reasoning_content) || text(delta.reasoning) || text(delta.reasoning_text);
+            if (reasoning) updateText(state, "reasoning", reasoning, onReasoning);
+            if (!Array.isArray(delta.tool_calls)) return;
+            for (const [fallback, raw] of delta.tool_calls.entries()) {
+                if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+                const call = record(raw);
+                const index = typeof call.index === "number" ? call.index : fallback;
+                const previous = state.toolCalls.get(index);
+                const fn = record(call.function);
+                state.toolCalls.set(index, {
+                    id: text(call.id) || previous?.id || "",
+                    name: text(fn.name) || previous?.name || "",
+                    arguments: (previous?.arguments || "") + text(fn.arguments),
+                });
+            }
+        },
+        flush,
+    );
 }
 
 export function consumeGeminiStreamText(state: GeminiStreamState, chunk: string, onDelta?: TextSink, onReasoning?: TextSink, flush = false) {
-    consumeJsonEvents(state, chunk, (payload) => {
-        const result = parseGeminiToolResponse(payload as GeminiPayload);
-        if (result.reasoning) updateText(state, "reasoning", result.reasoning, onReasoning);
-        if (result.content) updateText(state, "text", result.content, onDelta);
-        state.toolCalls.push(...result.toolCalls);
-    }, flush);
+    consumeJsonEvents(
+        state,
+        chunk,
+        (payload) => {
+            const result = parseGeminiToolResponse(payload as GeminiPayload);
+            if (result.reasoning) updateText(state, "reasoning", result.reasoning, onReasoning);
+            if (result.content) updateText(state, "text", result.content, onDelta);
+            state.toolCalls.push(...result.toolCalls);
+        },
+        flush,
+    );
 }

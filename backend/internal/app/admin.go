@@ -96,6 +96,10 @@ type ChannelRequest struct {
 	Models               []string         `json:"models"`
 	Headers              []OutboundHeader `json:"headers"`
 	Enabled              *bool            `json:"enabled"`
+	// ProxyURL 指针语义：nil = 请求未提交该字段（更新时保持渠道现有值），
+	// 指向空串 = 显式清空渠道代理。此前用 string 类型导致「删掉代理保存」
+	// 被 mergeChannelRequest 回填旧值，永远清不掉。
+	ProxyURL *string `json:"proxyUrl"`
 }
 
 type PublicModelChannel struct {
@@ -109,11 +113,13 @@ type PublicModelChannel struct {
 	APIKey           string                    `json:"apiKey"`
 	APIFormat        string                    `json:"apiFormat"`
 	ConcurrencyLimit int                       `json:"concurrencyLimit"`
+	ProxyURL         string                    `json:"proxyUrl"`
 	Models           []string                  `json:"models"`
 	ModelCosts       []PublicChannelModelPrice `json:"modelCosts"`
 	Headers          []OutboundHeader          `json:"headers,omitempty"`
 	HasAPIKey        bool                      `json:"hasApiKey"`
 	HasSecretKey     bool                      `json:"hasSecretKey"`
+	CatalogProvider  string                    `json:"catalogProviderId,omitempty"`
 	CreatedAt        time.Time                 `json:"createdAt"`
 	UpdatedAt        time.Time                 `json:"updatedAt"`
 }
@@ -190,6 +196,14 @@ func (s *Service) channelFromRequest(req ChannelRequest, channel model.ModelChan
 	}
 	channel.ModelsJSON = string(modelsJSON)
 	channel.HeadersJSON = headersJSON
+	proxyURL := ""
+	if req.ProxyURL != nil {
+		proxyURL = strings.TrimSpace(*req.ProxyURL)
+	}
+	if _, err := ValidateProxyURL(proxyURL); err != nil {
+		return channel, err
+	}
+	channel.ProxyURL = proxyURL
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
 	}
@@ -208,6 +222,9 @@ func mergeChannelRequest(req ChannelRequest, channel model.ModelChannel) Channel
 	}
 	if req.Headers == nil {
 		req.Headers, _ = ParseOutboundHeadersJSON(channel.HeadersJSON)
+	}
+	if req.ProxyURL == nil {
+		req.ProxyURL = &channel.ProxyURL
 	}
 	return req
 }
@@ -235,6 +252,7 @@ func publicChannel(channel model.ModelChannel, admin bool, channelModels []model
 	}
 	apiKey := ""
 	baseURL := channel.BaseURL
+	proxyURL := ""
 	var headers []OutboundHeader
 	if channel.Scope == model.ChannelScopeSystem {
 		if !admin {
@@ -247,6 +265,9 @@ func publicChannel(channel model.ModelChannel, admin bool, channelModels []model
 	} else if admin {
 		apiKey = channel.APIKey
 	}
+	if admin {
+		proxyURL = channel.ProxyURL
+	}
 	return PublicModelChannel{
 		ID:               channel.ID,
 		UserID:           channel.UserID,
@@ -258,11 +279,13 @@ func publicChannel(channel model.ModelChannel, admin bool, channelModels []model
 		APIKey:           apiKey,
 		APIFormat:        channel.APIFormat,
 		ConcurrencyLimit: channel.ConcurrencyLimit,
+		ProxyURL:         proxyURL,
 		Models:           models,
 		ModelCosts:       modelCosts,
 		Headers:          headers,
 		HasAPIKey:        strings.TrimSpace(channel.APIKey) != "",
 		HasSecretKey:     strings.TrimSpace(channel.SecretKey) != "",
+		CatalogProvider:  catalogProviderForAdmin(channel, admin),
 		CreatedAt:        channel.CreatedAt,
 		UpdatedAt:        channel.UpdatedAt,
 	}
