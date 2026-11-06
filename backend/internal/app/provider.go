@@ -175,6 +175,9 @@ func (s *Service) processCanvasGenerationTask(ctx context.Context, userID string
 		// transport-specific fixed token count when the model declares one.
 		input.MaxOutputTokens = input.Config.CapabilityConfig.Text.MaxOutputTokens
 	}
+	if requested := input.TextOptions.MaxOutputTokens; input.Mode == "text" && requested > 0 && (input.MaxOutputTokens == 0 || requested < input.MaxOutputTokens) {
+		input.MaxOutputTokens = requested
+	}
 	var textPublisher *taskTextStreamPublisher
 	if input.Mode == "text" && strings.HasPrefix(taskType, "canvas_text") {
 		requestedStream := input.TextOptions.Stream == nil || *input.TextOptions.Stream

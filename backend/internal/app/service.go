@@ -130,6 +130,7 @@ const taskWorkerConcurrency = 3
 const taskLogPayloadLimit = 4000
 
 type CreateTaskRequest struct {
+	apiKeyID        string
 	creationPrepare *creationTaskPreparation
 	admission       *taskAdmission
 	workbenchKind   string

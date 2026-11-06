@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 92
+const CurrentSchemaVersion int64 = 93
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -325,6 +325,20 @@ var schemaMigrations = []migration{
 					}
 				}
 			}
+		}
+		return nil
+	}},
+	{version: 93, name: "external_model_api_keys", checksum: "sha256:external-model-api-keys-v93-20261109", apply: func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.APIKey{}); err != nil {
+			return err
+		}
+		if !tx.Migrator().HasColumn(&model.Task{}, "APIKeyID") {
+			if err := tx.Migrator().AddColumn(&model.Task{}, "APIKeyID"); err != nil {
+				return err
+			}
+		}
+		if !tx.Migrator().HasIndex(&model.Task{}, "APIKeyID") {
+			return tx.Migrator().CreateIndex(&model.Task{}, "APIKeyID")
 		}
 		return nil
 	}},

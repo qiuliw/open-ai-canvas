@@ -7,6 +7,7 @@ import (
 )
 
 type Task struct {
+	APIKeyID string `json:"-" gorm:"size:36;index"`
 	// Only EnsureCloudAgent sets this after creating the execution in the same
 	// transaction. Ordinary task saves must not reset it from a stale snapshot.
 	AgentExecutionReady          bool                     `json:"-" gorm:"not null;default:false;<-:create"`
