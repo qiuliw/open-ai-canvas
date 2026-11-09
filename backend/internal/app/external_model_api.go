@@ -169,7 +169,11 @@ func modelCallTaskRequest(req CreateModelCallRequest) (CreateTaskRequest, error)
 		config["audioFormat"] = p.AudioFormat
 		config["audioSpeed"] = p.AudioSpeed
 	}
-	input := map[string]any{"mode": capability, "prompt": prompt, "config": config, "textHistory": history, "textOptions": canvasTextOptions{MaxOutputTokens: p.MaxOutputTokens, Thinking: p.Thinking}, "metadata": map[string]any{"source": "external-api"}}
+	thinkingLevel := ThinkingLevelOff
+	if p.Thinking {
+		thinkingLevel = ThinkingLevelMedium
+	}
+	input := map[string]any{"mode": capability, "prompt": prompt, "config": config, "textHistory": history, "textOptions": canvasTextOptions{MaxOutputTokens: p.MaxOutputTokens, ThinkingLevel: thinkingLevel}, "metadata": map[string]any{"source": "external-api"}}
 	return CreateTaskRequest{Type: "canvas_" + capability, Prompt: prompt, Model: modelKey, Input: input, TraceID: req.TraceID, RequestID: req.RequestID}, nil
 }
 
@@ -202,8 +206,17 @@ func (s *Service) normalizeModelCallTextLimit(input map[string]any) error {
 		limit = requested
 	}
 	limit = min(limit, 131072)
-	if options["thinking"] == true && limit <= 1024 && (cm.Protocol == model.ChannelInterfaceClaudeAPI || s.textModelWire("text", cm.Protocol) == protocol.TextWireClaude) {
-		return BadAuthRequest("Claude 思考模式的有效 maxOutputTokens 必须大于 1024")
+	if wire := thinkingWireForProtocol(string(cm.Protocol), s.protocolRegistry()); wire == protocol.TextWireClaude {
+		plan, err := resolveTextThinkingPlan(canvasGenerationInput{
+			Config:      providerConfig{CapabilityConfig: profile},
+			TextOptions: canvasTextOptions{ThinkingLevel: stringValue(options["thinkingLevel"])},
+		}, wire)
+		if err != nil {
+			return err
+		}
+		if plan.enabled() && plan.Config.Intensity.Kind == ThinkingIntensityBudget && limit <= thinkingBudgetFor(plan.Config, plan.Level, limit) {
+			return BadAuthRequest("Claude 思考预算必须小于有效 maxOutputTokens")
+		}
 	}
 	config["maxOutputTokens"] = limit
 	options["maxOutputTokens"] = limit

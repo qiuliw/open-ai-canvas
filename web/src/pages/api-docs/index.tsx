@@ -26,7 +26,7 @@ const parameters = [
     ["prompt", "string", "本轮提示词；与 messages 至少提供一项。"],
     ["messages", "array · 仅文本", "role 为 system、user 或 assistant；content 为非空字符串。省略 prompt 时最后一条须为 user。"],
     ["parameters.maxOutputTokens", "integer · 文本", "输出上限。有效值受模型配置及 131072 上限约束；省略时采用模型上限，无配置则为 4096。"],
-    ["parameters.thinking", "boolean · 文本", "思考开关，取决于协议支持。Claude 思考模式要求有效输出上限大于 1024。"],
+    ["parameters.thinking", "boolean · 文本", "按模型能力归一为关闭/标准档；无法关闭的模型使用最低开启档。Claude 预算模式要求有效输出上限大于实际思考预算（旧模型为 1024）。"],
     ["parameters.aspectRatio", "string · 图片/视频", "模型支持的画幅，例如 1:1 或 16:9。"],
     ["parameters.resolution", "string · 图片/视频", "模型支持的分辨率或档位。"],
     ["parameters.quality", "string · 图片", "模型声明的质量档位。"],

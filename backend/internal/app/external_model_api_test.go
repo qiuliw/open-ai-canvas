@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 	"yingce/backend/internal/model"
+	"yingce/backend/internal/protocol"
 )
 
 func TestExternalModelSystemInstructionsReachCanonicalProtocol(t *testing.T) {
@@ -61,23 +62,50 @@ func TestExternalModelOutputLimitMatchesBillingAndModelCeiling(t *testing.T) {
 }
 
 func TestExternalClaudeThinkingRejectsInsufficientOutputBudget(t *testing.T) {
-	profile := DefaultModelCapabilityConfigForModel("claude-api", "claude")
-	s, _, channel, cm := createSystemChannelSelectionFixture(t, "text", model.ChannelInterfaceClaudeAPI, profile, nil)
-	for _, tc := range []struct {
-		limit     int
-		wantError bool
-	}{{512, true}, {1024, true}, {2048, false}} {
-		req, err := modelCallTaskRequest(CreateModelCallRequest{Model: channel.ID + "::" + cm.ModelKey, Prompt: "hello", Parameters: ModelCallParameters{MaxOutputTokens: tc.limit, Thinking: true}})
-		if err != nil {
-			t.Fatal(err)
+	for _, budget := range []int{0, 4096} {
+		profile := DefaultModelCapabilityConfigForModel("claude-api", "claude")
+		profile.Text.MaxOutputTokens = 8192
+		if budget > 0 {
+			profile.Text.Thinking = &TextThinkingConfig{
+				Mode: ThinkingModeToggle, Levels: []string{ThinkingLevelOff, ThinkingLevelMedium}, Default: ThinkingLevelOff,
+				Switch:    ThinkingSwitchConfig{Kind: ThinkingSwitchThinkingType},
+				Intensity: ThinkingIntensityConfig{Kind: ThinkingIntensityBudget, Budgets: map[string]int{ThinkingLevelMedium: budget}},
+			}
 		}
-		input, err := normalizeTaskInput(req.Input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = s.normalizeModelCallTextLimit(input)
-		if (err != nil) != tc.wantError {
-			t.Fatalf("limit=%d err=%v", tc.limit, err)
+		s, _, channel, cm := createSystemChannelSelectionFixture(t, "text", model.ChannelInterfaceClaudeAPI, profile, nil)
+		for _, limit := range []int{512, 1024, 2048, 8192} {
+			for _, thinking := range []bool{false, true} {
+				req, err := modelCallTaskRequest(CreateModelCallRequest{Model: channel.ID + "::" + cm.ModelKey, Prompt: "hello", Parameters: ModelCallParameters{MaxOutputTokens: limit, Thinking: thinking}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				input, err := normalizeTaskInput(req.Input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = s.normalizeModelCallTextLimit(input)
+				wantError := thinking && limit <= max(budget, thinkingBudgetFloor)
+				if (err != nil) != wantError {
+					t.Fatalf("budget=%d limit=%d thinking=%v err=%v", budget, limit, thinking, err)
+				}
+				if err != nil {
+					continue
+				}
+				encoded, _ := json.Marshal(input)
+				var generation canvasGenerationInput
+				if err := json.Unmarshal(encoded, &generation); err != nil {
+					t.Fatal(err)
+				}
+				generation.Config.CapabilityConfig = profile
+				generation.MaxOutputTokens = limit
+				body := map[string]interface{}{"max_tokens": limit}
+				if got := applyTextThinking(body, generation, protocol.TextWireClaude); got != thinking {
+					t.Fatalf("thinking enabled=%v want %v", got, thinking)
+				}
+				if got := intFromAny(body["max_tokens"]); got != limit {
+					t.Fatalf("execution exceeded admitted limit: got=%d want=%d", got, limit)
+				}
+			}
 		}
 	}
 }

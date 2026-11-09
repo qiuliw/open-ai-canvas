@@ -16,7 +16,7 @@
 ### Task 1: API Key 持久化与生命周期
 
 - [x] 先写生命周期、过期和归属测试并观察失败。
-- [x] 新增 APIKey model/repository/app，以及迁移 90；任务保存服务端 Key ID。
+- [x] 新增 APIKey model/repository/app，以及迁移 93；任务保存服务端 Key ID。
 - [x] 运行 `go test ./internal/app -run TestAPIKey`，预期通过。
 
 ### Task 2: 受限外部模型调用

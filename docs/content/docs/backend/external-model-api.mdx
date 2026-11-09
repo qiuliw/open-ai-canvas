@@ -42,7 +42,7 @@ bun run dev
 
 打开 `http://localhost:3000`，首次注册管理员，配置系统渠道、模型协议、能力和有效价格档，为调用账号准备积分。前端默认代理 `/api` 到 `127.0.0.1:8080`。本地 Agent 嵌入模式另按开发文档安装 `backend/agent-runtime/pi` 依赖；模型接口本身不需要 Agent。
 
-生产使用既有 `docker-compose.deploy.yml` 和独立迁移服务，数据库升级至 Schema 90。生产数据与 `.local` 开发目录须分离。
+生产使用既有 `docker-compose.deploy.yml` 和独立迁移服务，数据库升级至 Schema 93。生产数据与 `.local` 开发目录须分离。
 
 ## 管理 API Key
 
@@ -126,7 +126,7 @@ curl -sS "$BASE_URL/api/model-calls" \
 
 | parameters 字段 | 用途 |
 | --- | --- |
-| `maxOutputTokens`、`thinking` | 文本输出上限、思考开关；有效上限取请求、模型上限及 131072 的较小值；省略时采用模型上限（无配置则 4096）；Claude 思考模式要求有效上限大于 1024 |
+| `maxOutputTokens`、`thinking` | 文本输出上限、思考开关；有效上限取请求、模型上限及 131072 的较小值；省略时采用模型上限（无配置则 4096）；思考开关按模型能力归一为关闭/标准档，无法关闭的模型使用最低开启档；Claude 预算模式要求有效上限大于实际思考预算（旧模型为 1024） |
 | `aspectRatio`、`resolution`、`quality` | 模型支持的画幅、分辨率和质量 |
 | `count` | 图片张数 |
 | `duration`、`generateAudio`、`watermark` | 视频秒数、音频、水印 |
@@ -167,7 +167,7 @@ curl -sS -L "$BASE_URL/api/model-calls/CALL_ID/media/RESOURCE_ID" \
 
 ## 存储、安全与错误
 
-- Schema 90 新增 `api_keys`：ID、账号、名称、显示前缀、SHA-256 散列、到期/吊销/创建时间。密钥使用 32 字节密码学随机数，不保存明文，无法恢复。
+- Schema 93 新增 `api_keys`：ID、账号、名称、显示前缀、SHA-256 散列、到期/吊销/创建时间。密钥使用 32 字节密码学随机数，不保存明文，无法恢复。
 - `tasks.api_key_id` 仅服务端设置，与任务及账单同次持久化，不能由 JSON 伪造，也不公开序列化。
 - 上游凭证仍归系统渠道管理。本站 Key 不转发给上游，不写入任务正文或 URL；Key 响应设置 `Cache-Control: no-store`。
 - 每次请求检查吊销、到期和账号状态。吊销立即阻止后续请求；已入队任务继续执行和计费，吊销不会取消任务或退款。
