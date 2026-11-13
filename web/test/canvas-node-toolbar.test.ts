@@ -40,7 +40,10 @@ describe("canvas node toolbar model", () => {
         expect(tool.disabled?.(ctx)).toBe(false);
         tool.run(ctx);
         expect(received).toEqual([node]);
-        for (const metadata of [{ ...node.metadata, locked: true }, { ...node.metadata, status: "loading" as const }]) {
+        for (const metadata of [
+            { ...node.metadata, locked: true },
+            { ...node.metadata, status: "loading" as const },
+        ]) {
             const withExistingMedia = createNodeContext({ ...node, metadata });
             withExistingMedia.handlers = ctx.handlers;
             expect(tool.disabled?.(withExistingMedia)).toBe(false);
@@ -58,7 +61,12 @@ describe("canvas node toolbar model", () => {
         const ctx = createNodeContext({ id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: {} });
         const emptyTools = resolveToolbarTools("node-hover", ctx, null);
         expect(emptyTools.some((tool) => tool.id === "extractAudio")).toBe(false);
-        expect(resolveNodeToolbarPlacement(emptyTools.find((tool) => tool.id === "uploadVideo")!, ctx).group).toBe("primary");
+        expect(
+            resolveNodeToolbarPlacement(
+                emptyTools.find((tool) => tool.id === "uploadVideo")!,
+                ctx,
+            ).group,
+        ).toBe("primary");
         ctx.nodeMetadata = { content: "video.mp4" };
         ctx.extractingAudio = true;
         const audio = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "extractAudio")!;
@@ -82,10 +90,11 @@ describe("canvas node toolbar model", () => {
         const tools = resolveToolbarTools("node-hover", ctx, null);
         const groups = new Map(tools.map((tool) => [tool.id, resolveNodeToolbarPlacement(tool, ctx).group]));
 
-        expect([...groups].filter(([, group]) => group === "primary").map(([id]) => id)).toEqual(["trimRegenerate", "subtitles"]);
+        expect([...groups].filter(([, group]) => group === "primary").map(([id]) => id)).toEqual(["trimRegenerate"]);
         expect([...groups].filter(([, group]) => group === "process").map(([id]) => id)).toEqual(["extractFrames", "extractAudio"]);
         expect(groups.get("download")).toBe("utility");
-        expect(groups.get("timeline")).toBe("workspace");
+        expect(groups.has("timeline")).toBe(false);
+        expect(groups.has("subtitles")).toBe(false);
         expect(groups.get("uploadVideo")).toBe("more");
         expect(groups.get("delete")).toBe("more");
         expect(groups.get("node-lock")).toBe("more");
@@ -99,25 +108,44 @@ describe("canvas node toolbar model", () => {
             return typeof value === "function" ? value(ctx) : value;
         };
 
-        expect(displayLabel("subtitles")).toBe("字幕");
-        expect(displayLabel("timeline")).toBe("进入剪辑");
+        expect(displayLabel("subtitles")).toBeUndefined();
+        expect(displayLabel("timeline")).toBeUndefined();
         expect(displayLabel("extractFrames")).toBe("提取画面");
         expect(displayLabel("extractAudio")).toBe("提取音频");
+    });
+
+    test("preserves delivery of existing subtitles without an editing entry", () => {
+        const node: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { subtitleEntries: [{ index: 1, startMs: 0, endMs: 1200, text: "保留字幕" }] } };
+        const ctx = createNodeContext(node);
+        const received: CanvasNodeData[] = [];
+        ctx.handlers.onNodeDownloadSubtitles = (target) => {
+            received.push(target);
+        };
+        const tool = resolveToolbarTools("node-hover", ctx, null).find((item) => item.id === "downloadSubtitles")!;
+        expect(tool).toBeDefined();
+        expect(resolveNodeToolbarPlacement(tool, ctx).group).toBe("more");
+        tool.run(ctx);
+        expect(received).toEqual([node]);
+        ctx.nodeMetadata = { subtitleEntries: [] };
+        expect(resolveToolbarTools("node-hover", ctx, null).some((item) => item.id === "downloadSubtitles")).toBe(false);
     });
 
     test("image-only tools carry presentation metadata instead of relying on component ID lists", () => {
         const node: CanvasNodeData = { id: "image", type: CanvasNodeType.Image, title: "图片", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { content: "image.png" } };
         const tools = buildImageToolbarTools(node, {} as never);
 
-        expect(tools.find((tool) => tool.id === "angle")?.group).toBe("viewpoint");
-        expect(tools.find((tool) => tool.id === "maskEdit")?.group).toBe("primary");
+        expect(tools.find((tool) => tool.id === "angle")?.group).toBe("camera");
+        expect(tools.find((tool) => tool.id === "regionEdit")?.group).toBe("primary");
         expect(tools.some((tool) => tool.id === "superResolve")).toBe(false);
-        expect(tools.find((tool) => tool.id === "emotion")?.group).toBe("portrait");
+        expect(tools.find((tool) => tool.id === "emotion")?.group).toBe("adjust");
+        expect(tools.find((tool) => tool.id === "cinematic_light_correction")?.group).toBe("adjust");
+        expect(tools.find((tool) => tool.id === "image_projection_after_3s")?.group).toBe("camera");
+        expect(tools.find((tool) => tool.id === "character_three_view_generation")?.section).toBe("设定图");
         expect(tools.find((tool) => tool.id === "upscale")?.description).toContain("不是 AI 超分");
         expect(tools.find((tool) => tool.id === "crop")?.section).toBe("构图与尺寸");
         expect(tools.find((tool) => tool.id === "resize")?.active).toBe(true);
         expect(tools.find((tool) => tool.id === "copyPrompt")?.group).toBe("more");
-        expect(tools.find((tool) => tool.id === "previs")?.group).toBe("primary");
+        expect(tools.find((tool) => tool.id === "previs")?.group).toBe("camera");
         expect(tools.find((tool) => tool.id === "previs")?.description).toContain("Agent");
     });
 });

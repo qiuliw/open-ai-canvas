@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -159,8 +160,17 @@ func TestDefaultMiniMaxVideoCapabilitySupportsThirtySecondGeneration(t *testing.
 					if valid && err != nil {
 						t.Fatalf("validateVideoTask(%d seconds): %v", seconds, err)
 					}
-					if !valid && (err == nil || !strings.Contains(err.Error(), "视频时长不在当前模型支持范围内")) {
-						t.Fatalf("validateVideoTask(%d seconds) error = %v", seconds, err)
+					label := videoDurationAllowedLabel(profile.Duration)
+					if !strings.Contains(label, "4–30 秒") {
+						t.Fatalf("allowed range label = %q", label)
+					}
+					want := fmt.Sprintf("视频时长 %d 秒不在当前模型支持范围内（%s）", seconds, label)
+					if !valid && (err == nil || !strings.Contains(err.Error(), want)) {
+						t.Fatalf("validateVideoTask(%d seconds) error = %v, want %q", seconds, err, want)
+					}
+					var argumentErr *modelCapabilityArgumentError
+					if !valid && (!errors.As(err, &argumentErr) || argumentErr.Field != "durationSeconds" || argumentErr.Issue != "unsupported_value") {
+						t.Fatalf("validateVideoTask(%d seconds) lost the field code: %#v", seconds, err)
 					}
 				})
 			}
@@ -192,21 +202,25 @@ func TestAgnesVideo25CapabilityUsesOfficialLimits(t *testing.T) {
 	}
 }
 
-func TestNormalizeAgnesVideo25CapabilityRepairsLegacyStoredLimits(t *testing.T) {
-	legacy := DefaultModelCapabilityConfigForModel("newapi", "legacy-video")
-	normalized, err := NormalizeModelCapabilityConfigForModel("video", "agnes-video", "agnes-video-2.5", legacy)
-	if err != nil {
-		t.Fatalf("NormalizeModelCapabilityConfigForModel() error = %v", err)
-	}
-	if normalized.Video.Duration.Min != 4 || normalized.Video.Duration.Max != 12 || normalized.Video.Duration.Default != 5 {
-		t.Fatalf("normalized duration = %#v", normalized.Video.Duration)
-	}
-	if fmt.Sprint(normalized.Video.Resolutions) != fmt.Sprint([]string{"720P", "960P", "2K"}) {
-		t.Fatalf("normalized resolutions = %v", normalized.Video.Resolutions)
-	}
-	input := canvasGenerationInput{Config: providerConfig{InterfaceType: "agnes-video", Model: "agnes-video-2.5", VideoSeconds: "15", Size: "16:9", VQuality: "720P"}}
-	if err := validateVideoTask(normalized.Video, input); err == nil {
-		t.Fatalf("validateVideoTask(15 seconds) error = %v", err)
+func TestNormalizeAgnesVideo25PreservesExplicitCapability(t *testing.T) {
+	for _, name := range []string{"agnes-video-2.5", "agnes-video-2.5-flash"} {
+		t.Run(name, func(t *testing.T) {
+			profile := DefaultModelCapabilityConfigForModel("agnes-video", name)
+			profile.Video.References.MaxImages = 1
+			profile.Video.Duration.Default = 8
+			profile.Video.Ratios, profile.Video.DefaultRatio = []string{"9:16"}, "9:16"
+			normalized, err := NormalizeModelCapabilityConfigForModel("video", "agnes-video", name, profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if normalized.Video.References.MaxImages != 1 || normalized.Video.Duration.Default != 8 || normalized.Video.DefaultRatio != "9:16" || len(normalized.Video.Ratios) != 1 {
+				t.Fatalf("explicit capability overwritten: %#v", normalized.Video)
+			}
+			input := canvasGenerationInput{Config: providerConfig{InterfaceType: "agnes-video", Model: name, VideoSeconds: "15", Size: "9:16", VQuality: "720P"}}
+			if err := validateVideoTask(normalized.Video, input); err == nil {
+				t.Fatal("out-of-range duration accepted")
+			}
+		})
 	}
 }
 

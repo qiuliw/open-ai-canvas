@@ -1,6 +1,7 @@
-import { App, Button, InputNumber, Modal, Spin } from "antd";
+import { App, Button, InputNumber, Spin } from "antd";
+import { AdminModal } from "@/pages/admin/ui/overlays";
 import { ArrowDown, ArrowUp, GripVertical, ListOrdered } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { AdminEmpty } from "@/pages/admin/components/admin-ui";
 import { getChannelOrder, saveChannelOrder, type ChannelOrderItem } from "@/services/api/channel-order";
 import { Select } from "@/components/ui/base/select";
@@ -14,7 +15,7 @@ export function moveOrderItem<T extends { id: string }>(items: T[], id: string, 
     return next;
 }
 
-export function ChannelOrderDialog({ channelId, onSaved }: { channelId?: string; onSaved: () => Promise<void> }) {
+export function ChannelOrderDialog({ channelId, onSaved, renderTrigger }: { channelId?: string; onSaved: () => Promise<void>; renderTrigger?: (open: () => void) => ReactNode }) {
     const { message } = App.useApp();
     const [open, setOpen] = useState(false),
         [loading, setLoading] = useState(false),
@@ -70,10 +71,14 @@ export function ChannelOrderDialog({ channelId, onSaved }: { channelId?: string;
     };
     return (
         <>
-            <Button icon={<ListOrdered className="size-4" />} onClick={() => void start()}>
-                {channelId ? "自定义排序" : "设置排序"}
-            </Button>
-            <Modal
+            {renderTrigger ? (
+                renderTrigger(() => void start())
+            ) : (
+                <Button icon={<ListOrdered className="size-4" />} onClick={() => void start()}>
+                    {channelId ? "自定义排序" : "设置排序"}
+                </Button>
+            )}
+            <AdminModal
                 title={channelId ? "自定义模型排序" : "调整渠道顺序"}
                 open={open}
                 onCancel={() => setOpen(false)}
@@ -164,7 +169,7 @@ export function ChannelOrderDialog({ channelId, onSaved }: { channelId?: string;
                         )}
                     </div>
                 </Spin>
-            </Modal>
+            </AdminModal>
         </>
     );
 }

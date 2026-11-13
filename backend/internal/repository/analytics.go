@@ -105,7 +105,7 @@ func (r *Repository) AnalyticsTasks(filter AnalyticsFilter) ([]model.Task, error
 func (r *Repository) AnalyticsAPICallLogs(filter AnalyticsFilter) ([]model.ApiCallLog, error) {
 	var logs []model.ApiCallLog
 	query := r.apiCallLogQuery(filter)
-	return logs, query.Omit("RequestBody", "ResponseBody").Find(&logs).Error
+	return logs, query.Omit("RequestBody", "ResponseBody", "GenerationContentJSON").Find(&logs).Error
 }
 
 // PublicModelAvailabilityLogs returns the compact, user-facing create
@@ -123,6 +123,22 @@ func (r *Repository) PublicModelAvailabilityLogs(filter PublicModelAvailabilityF
 		Where("api_call_logs.request_kind = ?", "create").
 		Where("api_call_logs.status IN ?", []model.ApiCallStatus{model.ApiCallStatusSucceeded, model.ApiCallStatusFailed}).
 		Order("api_call_logs.created_at asc")
+	return logs, query.Find(&logs).Error
+}
+
+// AdminModelHealthLogs 返回管理端模型稳定性所需的 create 结果，按时间倒序并限制条数。
+func (r *Repository) AdminModelHealthLogs(filter PublicModelAvailabilityFilter, limit int) ([]model.ApiCallLog, error) {
+	var logs []model.ApiCallLog
+	if len(filter.ChannelIDs) == 0 || !filter.To.After(filter.From) {
+		return logs, nil
+	}
+	query := whereTimeRange(r.db.Select("channel_id", "model", "status", "status_code", "error_code", "duration_ms", "created_at"), "api_call_logs.created_at", filter.From, filter.To).
+		Where("api_call_logs.channel_id IN ?", filter.ChannelIDs).
+		Where("api_call_logs.model <> ''").
+		Where("api_call_logs.request_kind = ?", "create").
+		Where("api_call_logs.status IN ?", []model.ApiCallStatus{model.ApiCallStatusSucceeded, model.ApiCallStatusFailed}).
+		Order("api_call_logs.created_at desc").
+		Limit(limit)
 	return logs, query.Find(&logs).Error
 }
 
@@ -168,7 +184,7 @@ func (r *Repository) QueryAPICallLogs(filter APICallLogFilter) ([]model.ApiCallL
 		return nil, 0, err
 	}
 	var logs []model.ApiCallLog
-	err := r.filteredAPICallLogQuery(filter).Omit("RequestBody", "ResponseBody").Order("api_call_logs.created_at desc").Offset((filter.Page - 1) * filter.Limit).Limit(filter.Limit).Find(&logs).Error
+	err := r.filteredAPICallLogQuery(filter).Omit("RequestBody", "ResponseBody", "GenerationContentJSON").Order("api_call_logs.created_at desc").Offset((filter.Page - 1) * filter.Limit).Limit(filter.Limit).Find(&logs).Error
 	return logs, total, err
 }
 
@@ -181,7 +197,7 @@ func (r *Repository) ExportAPICallLogs(filter APICallLogFilter, limit int) ([]mo
 		query = query.Where("api_call_logs.id IN ?", filter.IDs)
 	}
 	var logs []model.ApiCallLog
-	err := query.Omit("RequestBody", "ResponseBody").Order("api_call_logs.created_at desc").Limit(limit).Find(&logs).Error
+	err := query.Omit("RequestBody", "ResponseBody", "GenerationContentJSON").Order("api_call_logs.created_at desc").Limit(limit).Find(&logs).Error
 	return logs, err
 }
 
@@ -192,7 +208,7 @@ func (r *Repository) filteredAPICallLogQuery(filter APICallLogFilter) *gorm.DB {
 		query = query.Where("api_call_logs.request_kind = ?", "download")
 	case "all":
 	default:
-		query = visibleAPICallLogQuery(query).Where("COALESCE(api_call_logs.request_kind, '') NOT IN ?", []string{"download", "upload", "local_save", "register"})
+		query = visibleAPICallLogQuery(query).Where("COALESCE(api_call_logs.request_kind, '') NOT IN ?", []string{"download", "upload", "local_save", "local_fallback", "offload", "register"})
 	}
 	if value := strings.TrimSpace(filter.Keyword); value != "" {
 		pattern := "%" + strings.ToLower(value) + "%"
@@ -307,13 +323,23 @@ func (r *Repository) HasAPICallLogForTask(taskID string) (bool, error) {
 // HasVisibleFailedAPICallLogForTask 判断管理端默认请求明细里是否已经有这条任务的失败记录。
 // 轮询、下载、上传和本地保存默认不出现在请求日志列表，不能据此认为用户可见的失败已经被记录。
 func (r *Repository) HasVisibleFailedAPICallLogForTask(taskID string) (bool, error) {
-	if strings.TrimSpace(taskID) == "" {
+	return r.HasVisibleFailedAPICallLogForAttempt(model.Task{ID: taskID})
+}
+
+func (r *Repository) HasVisibleFailedAPICallLogForAttempt(task model.Task) (bool, error) {
+	if strings.TrimSpace(task.ID) == "" {
 		return false, nil
 	}
 	var count int64
-	err := r.db.Model(&model.ApiCallLog{}).
-		Where("task_id = ? AND status = ? AND COALESCE(request_kind, '') NOT IN ?", taskID, model.ApiCallStatusFailed, []string{"poll", "download", "upload", "local_save", "register"}).
-		Count(&count).Error
+	query := r.db.Model(&model.ApiCallLog{}).
+		Where("task_id = ? AND status = ? AND COALESCE(request_kind, '') NOT IN ?", task.ID, model.ApiCallStatusFailed, []string{"poll", "download", "upload", "local_save", "local_fallback", "offload", "register"})
+	if task.BillingOrderID != "" {
+		query = query.Where("billing_order_id = ?", task.BillingOrderID)
+	}
+	if task.StartedAt != nil {
+		query = query.Where("created_at >= ?", *task.StartedAt)
+	}
+	err := query.Count(&count).Error
 	return count > 0, err
 }
 

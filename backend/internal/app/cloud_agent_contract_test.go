@@ -12,6 +12,7 @@ import (
 
 	"yingce/backend/internal/canvas/capability"
 	"yingce/backend/internal/model"
+	"yingce/backend/internal/skills"
 )
 
 func TestCloudAgentMixedCanvasReadsUnsupportedNodesWithoutGrantingCapabilities(t *testing.T) {
@@ -314,26 +315,31 @@ func TestCloudAgentAnnotationRenderFeedsControlledTransientReference(t *testing.
 	}
 }
 
-func TestCloudAgentPolicyPublishesSkillManifestWithoutInliningSkillBody(t *testing.T) {
-	skill := cloudAgentSkill{ID: "skill-1", Name: "任务技能", Description: "当用户要写短剧剧本时调用", Version: "v1", Hash: agentProfileHash("skill"), Instruction: "PRIVATE_SKILL_BODY", Files: map[string]string{"references/a.md": "A"}}
-	text, _, err := compileCloudAgentPolicies(agentTestRequest(), defaultCanvasAppearance().AgentName, []cloudAgentSkill{skill}, "", cloudAgentProfileSnapshot{Revision: agentProfileRevision(nil), Hash: agentProfileHash("")})
+func TestCloudAgentPolicyPublishesSkillCatalogWithoutBodyOrFileLists(t *testing.T) {
+	catalog := buildCloudAgentSkillCatalog([]skills.AgentSkillCatalogEntry{
+		{SkillID: "skill-1", Name: "任务技能", Description: "当用户要写短剧剧本时调用", Tag: "drama", VersionID: "v1", FileCount: 3},
+	}, 2000)
+	text, _, err := compileCloudAgentPolicies(agentTestRequest(), defaultCanvasAppearance().AgentName, &catalog, "", cloudAgentProfileSnapshot{Revision: agentProfileRevision(nil), Hash: agentProfileHash("")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(text, skill.Instruction) || !strings.Contains(text, `"entryPath":"SKILL.md"`) || !strings.Contains(text, `"files":["SKILL.md","references/a.md"]`) || !strings.Contains(text, `"description":"当用户要写短剧剧本时调用"`) {
-		t.Fatalf("compiled policy did not publish a safe on-demand skill manifest: %s", text)
+	if !strings.Contains(text, "## 已安装技能目录") || !strings.Contains(text, "任务技能 [skill-1]：当用户要写短剧剧本时调用（另有 2 个文件）") {
+		t.Fatalf("compiled policy did not publish the skill catalog: %s", text)
+	}
+	if strings.Contains(text, `"files":`) || strings.Contains(text, `"entryPath"`) {
+		t.Fatalf("catalog must not inline per-skill file lists: %s", text)
 	}
 }
 
-func TestCloudAgentPolicyTruncatesOversizedSkillDescription(t *testing.T) {
+func TestCloudAgentPolicyTrimsLongSkillDescriptionInCatalog(t *testing.T) {
 	long := strings.Repeat("描", 600)
-	skill := cloudAgentSkill{ID: "skill-2", Name: "长描述技能", Description: long, Version: "v1", Hash: agentProfileHash("skill2")}
-	text, _, err := compileCloudAgentPolicies(agentTestRequest(), defaultCanvasAppearance().AgentName, []cloudAgentSkill{skill}, "", cloudAgentProfileSnapshot{Revision: agentProfileRevision(nil), Hash: agentProfileHash("")})
+	catalog := buildCloudAgentSkillCatalog([]skills.AgentSkillCatalogEntry{{SkillID: "skill-2", Name: "长描述技能", Description: long, VersionID: "v1"}}, 2000)
+	text, _, err := compileCloudAgentPolicies(agentTestRequest(), defaultCanvasAppearance().AgentName, &catalog, "", cloudAgentProfileSnapshot{Revision: agentProfileRevision(nil), Hash: agentProfileHash("")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(text, long) || !strings.Contains(text, strings.Repeat("描", 500)+"…") {
-		t.Fatalf("oversized skill description was not capped at 500 runes: %s", text)
+	if strings.Contains(text, strings.Repeat("描", cloudAgentSkillCatalogSummaryRunes+1)) || !strings.Contains(text, strings.Repeat("描", cloudAgentSkillCatalogSummaryRunes)+"…") {
+		t.Fatalf("catalog description was not trimmed to %d runes", cloudAgentSkillCatalogSummaryRunes)
 	}
 }
 
@@ -461,14 +467,14 @@ func TestCloudAgentReadTextLoadsOwnedResource(t *testing.T) {
 
 func TestCloudAgentCanvasStateBoundsDefaultBodyProjection(t *testing.T) {
 	body := strings.Repeat("长正文 ", 999) + "长正文"
-	doc := map[string]any{"nodes": []map[string]any{{"id": "markdown", "type": "markdown", "title": "长文档", "metadata": map[string]any{"content": body}}}, "connections": []map[string]any{}}
+	doc := map[string]any{"nodes": []map[string]any{{"id": "markdown", "type": "text", "title": "长文档", "metadata": map[string]any{"content": body, "textFormat": "markdown"}}}, "connections": []map[string]any{}}
 	view, err := cloudAgentCanvasState(nil, "user", "agent-canvas", doc, 0, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	item := view.(map[string]any)["nodes"].([]any)[0].(map[string]any)
 	content := stringValue(item["content"])
-	if len([]rune(content)) > 323 || item["contentTruncated"] != true {
+	if len([]rune(content)) > 323 || item["contentTruncated"] != true || item["textFormat"] != "markdown" {
 		t.Fatalf("default canvas read was not bounded: len=%d item=%v", len([]rune(content)), item)
 	}
 	precise, err := cloudAgentCanvasState(nil, "user", "agent-canvas", doc, 0, []string{"markdown"}, 0)
@@ -476,7 +482,7 @@ func TestCloudAgentCanvasStateBoundsDefaultBodyProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	preciseItem := precise.(map[string]any)["nodes"].([]any)[0].(map[string]any)
-	if stringValue(preciseItem["content"]) != body || preciseItem["contentTruncated"] != nil {
+	if stringValue(preciseItem["content"]) != body || preciseItem["contentTruncated"] != nil || preciseItem["textFormat"] != "markdown" {
 		t.Fatalf("precise canvas read lost full content: got=%d want=%d item=%v", len([]rune(stringValue(preciseItem["content"]))), len([]rune(body)), preciseItem)
 	}
 }

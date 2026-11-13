@@ -36,12 +36,36 @@
     padding: 8px;
 }
 
+.admin-channel-categories {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2px;
+}
+.admin-channel-categories button {
+    padding: 6px 0;
+    border: 0;
+    border-radius: var(--admin-radius);
+    background: transparent;
+    color: var(--admin-text-muted);
+    font-size: 12px;
+    cursor: pointer;
+}
+.admin-channel-categories button:hover,
+.admin-channel-categories button[aria-pressed="true"] {
+    background: var(--admin-nav-active);
+    color: var(--admin-text);
+}
+.admin-channel-categories button:focus-visible {
+    outline: 2px solid var(--admin-focus);
+    outline-offset: -2px;
+}
+
 .admin-channel-item {
     display: flex;
     width: 100%;
     flex-direction: column;
-    gap: 7px;
-    padding: 9px 10px;
+    gap: 8px;
+    padding: 8px 8px;
     margin-bottom: 4px;
     border: 0;
     border-radius: var(--admin-radius);
@@ -96,7 +120,7 @@
     align-items: center;
     justify-content: center;
     min-width: 24px;
-    padding: 2px 7px;
+    padding: 2px 8px;
     border-radius: var(--admin-radius-sm);
     background: var(--admin-surface-3);
     color: var(--admin-text-secondary);
@@ -118,7 +142,7 @@
 .admin-channel-item-status {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     font-size: 11px;
 }
 
@@ -136,7 +160,7 @@
 
 .admin-channel-sidebar-footer {
     flex: none;
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-top: 1px solid var(--admin-divider);
 }
 
@@ -144,19 +168,137 @@
     width: 100%;
 }
 
-.admin-channel-detail-header {
+.admin-channel-website-header {
     display: flex;
     flex: none;
     flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
+}
+
+.admin-channel-website-header > div {
+    width: 100%;
+}
+
+.admin-channel-website-identity {
+    display: flex;
+    align-items: baseline;
+    flex: 1;
+    min-width: 0;
+    gap: 12px;
+}
+
+.admin-channel-model-filters {
+    display: flex;
+    flex: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 16px 12px;
     border-bottom: 1px solid var(--admin-divider);
+}
+
+.admin-channel-model-filters > .ant-input-affix-wrapper {
+    width: 260px;
+    max-width: 100%;
+}
+
+.admin-channel-model-filters > :not(.ant-input-affix-wrapper, .ant-btn) {
+    width: 156px;
+}
+
+.admin-channel-key-groups {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 12px 12px;
+}
+
+.admin-channel-key-group {
+    min-width: 0;
+    padding-block: 12px;
+    background: var(--admin-surface);
+}
+
+.admin-channel-key-group .admin-channel-detail-title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    font-size: 14px;
+}
+
+.admin-channel-key-index,
+.admin-channel-model-count {
+    color: var(--admin-text-muted);
+    font-size: 12px;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.admin-channel-key-group + .admin-channel-key-group {
+    border-top: 1px solid var(--admin-divider);
+}
+
+.admin-channel-key-drag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 28px;
+    flex: none;
+    border: 0;
+    border-radius: var(--admin-radius-sm);
+    background: transparent;
+    color: var(--admin-text-muted);
+    cursor: grab;
+}
+
+.admin-channel-key-drag:hover:not(:disabled) {
+    background: var(--admin-row-hover);
+    color: var(--admin-text);
+}
+
+.admin-channel-key-drag:focus-visible {
+    outline: 2px solid var(--admin-focus);
+    outline-offset: 2px;
+}
+
+.admin-channel-key-drag:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.admin-channel-key-group[data-dragging="true"] {
+    opacity: 0.55;
+}
+
+.admin-channel-key-group[data-drop-position="before"] {
+    box-shadow: inset 0 2px var(--admin-focus);
+}
+
+.admin-channel-key-group[data-drop-position="after"] {
+    box-shadow: inset 0 -2px var(--admin-focus);
+}
+
+.admin-channel-group-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+}
+
+.admin-channel-key-group .admin-channel-model-manager {
+    flex: none;
+    padding: 0;
 }
 
 .admin-channel-detail-title {
     overflow-wrap: anywhere;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 600;
 }
 
@@ -244,7 +386,7 @@
 .admin-model-reprice-field {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     width: 190px;
     max-width: 100%;
 }
@@ -309,7 +451,7 @@
 }
 
 .admin-model-reprice-table .ant-table-tbody > tr > td {
-    padding: 6px 16px;
+    padding: 8px 16px;
     vertical-align: middle;
     overflow-wrap: anywhere;
 }
@@ -326,7 +468,7 @@
 
 .admin-model-reprice-spec-row > div {
     min-width: 0;
-    padding: 6px 16px;
+    padding: 8px 16px;
 }
 
 .admin-model-reprice-spec-row + .admin-model-reprice-spec-row {
@@ -334,7 +476,7 @@
 }
 
 .admin-model-reprice-no-spec {
-    padding: 6px 16px;
+    padding: 8px 16px;
     color: var(--admin-text-muted);
 }
 
@@ -438,8 +580,108 @@
     }
 
     .admin-channel-sidebar-header,
-    .admin-channel-detail-header,
+    .admin-channel-website-header,
     .admin-channel-model-manager {
         padding: 12px;
     }
+}
+
+/* 模型稳定性单元：成功率 + 最近 10 次结果，与用户端可用率同一口径但不设最少样本门槛。 */
+.admin-model-health {
+    display: inline-flex;
+    min-width: 108px;
+    flex-direction: column;
+    gap: 4px;
+    border-radius: 6px;
+    outline: none;
+}
+
+.admin-model-health:focus-visible {
+    outline: 2px solid var(--admin-focus);
+    outline-offset: 2px;
+}
+
+.admin-model-health-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 16px;
+}
+
+.admin-model-health-head strong {
+    color: var(--admin-text);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.admin-model-health[data-tone="success"] .admin-model-health-head strong {
+    color: var(--admin-status-success);
+}
+
+.admin-model-health[data-tone="warning"] .admin-model-health-head strong {
+    color: var(--admin-status-warning);
+}
+
+.admin-model-health[data-tone="error"] .admin-model-health-head strong {
+    color: var(--admin-status-error);
+}
+
+.admin-model-health-head span {
+    color: var(--admin-text-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.admin-model-health-track {
+    display: grid;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    gap: 2px;
+}
+
+.admin-model-health-pill {
+    height: 6px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--admin-text-muted) 22%, transparent);
+}
+
+.admin-model-health-pill.is-success {
+    background: var(--admin-status-success);
+}
+
+.admin-model-health-pill.is-failed {
+    background: var(--admin-status-error);
+}
+
+/* 渠道列表中的 24 小时成功率徽标。 */
+.admin-channel-item-health {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.admin-channel-item-health[data-tone="success"] {
+    color: var(--admin-status-success);
+}
+
+.admin-channel-item-health[data-tone="warning"] {
+    color: var(--admin-status-warning);
+}
+
+.admin-channel-item-health[data-tone="error"] {
+    color: var(--admin-status-error);
+}
+
+/* 渠道与模型页的视图切换：按渠道管理 / 跨渠道查全部模型。 */
+.admin-channel-view-switch.ant-segmented {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    margin-bottom: 12px;
+}
+
+.admin-all-models {
+    display: flex;
+    min-height: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
 }

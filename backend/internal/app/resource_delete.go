@@ -111,6 +111,17 @@ func (s *Service) deleteUserAssetsWithResources(userID string, ids []string, pur
 		if deleteReferencedResources {
 			// 彻底删除只需要知道哪些资源仍被「其他素材」复用（这些资源要保留），不扫描任务和画布。
 			snapshot, snapshotErr = s.repo.OtherAssetResourceReferences(userID, assetIDs)
+			if snapshotErr == nil {
+				// 短剧表直接持有的媒体同样保留：素材记录只是它在素材库里的入口。
+				var dramaReferences []repository.ResourceDirectReference
+				dramaReferences, snapshotErr = s.repo.DramaResourceReferences(userID, ownedIDs)
+				snapshot.Direct = append(snapshot.Direct, dramaReferences...)
+			}
+			if snapshotErr == nil {
+				var logReferences []repository.ResourceDirectReference
+				logReferences, snapshotErr = s.repo.APICallLogResourceReferences(userID, ownedIDs)
+				snapshot.Direct = append(snapshot.Direct, logReferences...)
+			}
 		} else {
 			snapshot, snapshotErr = s.repo.ResourceReferenceSnapshotExcludingAssets(userID, assetIDs, ownedIDs)
 		}
@@ -120,7 +131,11 @@ func (s *Service) deleteUserAssetsWithResources(userID string, ids []string, pur
 		sharedAssetResourceIDs := map[string]struct{}{}
 		for _, reference := range snapshot.Direct {
 			if _, exists := ownedIDSet[reference.ResourceID]; exists {
-				if reference.Kind == "素材" {
+				if reference.Kind == repository.APICallLogResourceReferenceKind && deleteReferencedResources {
+					sharedAssetResourceIDs[reference.ResourceID] = struct{}{}
+					continue
+				}
+				if reference.Kind == "素材" || reference.Kind == repository.DramaResourceReferenceKind {
 					sharedAssetResourceIDs[reference.ResourceID] = struct{}{}
 					continue
 				}
@@ -318,6 +333,12 @@ func (s *Service) deleteStoredResourceObject(userID string, resource *model.Reso
 			return fmt.Errorf("无法读取七牛云 Kodo 配置：%w", err)
 		}
 		return deleteQiniuObject(setting, resource.ObjectKey)
+	case volcengineTOSProvider:
+		setting, err := s.ossSettingForResource(userID, resource)
+		if err != nil {
+			return fmt.Errorf("无法读取火山引擎 TOS 配置：%w", err)
+		}
+		return deleteS3Object(setting, resource.ObjectKey)
 	case s3Provider:
 		setting, err := s.ossSettingForResource(userID, resource)
 		if err != nil {

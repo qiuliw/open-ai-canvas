@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+	canvasdoc "yingce/backend/internal/canvas/document"
 	"yingce/backend/internal/kernel"
 
 	"yingce/backend/internal/model"
@@ -99,6 +100,10 @@ func (s *Service) UpsertUserAsset(userID string, raw json.RawMessage) (UserDataS
 		existing, existingErr := s.repo.AssetForUser(userID, asset.ID)
 		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
 			return existingErr
+		}
+		// 方舟认证分类只由服务端写入认证结果时设置；客户端只能保留已在该分类的素材。
+		if asset.Category == model.AssetCategoryArk && (existing == nil || existing.Category != model.AssetCategoryArk) {
+			return kernel.BadAuthRequest("方舟认证分类由认证结果自动设置，不能手动选择")
 		}
 		if existing != nil && existing.PayloadJSON != asset.PayloadJSON {
 			if err := s.ValidateAssetCanvasReferences(userID, asset); err != nil {
@@ -234,9 +239,10 @@ func (s *Service) UpsertUserCanvasProject(userID string, raw json.RawMessage) (U
 	return s.upsertUserCanvasProjectWithHistory(userID, raw, "automatic")
 }
 
+// 回执只保存重放需要的摘要。每次 operations 都会写一条回执，写入整份画布会让表随编辑次数线性膨胀；
+// 早期回执里残留的 document 字段在解码时被忽略，并随保留期过期清理。
 type canvasMutationReceiptResult struct {
-	Summary  UserDataSummary `json:"summary"`
-	Document json.RawMessage `json:"document"`
+	Summary UserDataSummary `json:"summary"`
 }
 
 func decodeCanvasMutationReceipt(raw string, result *UserDataSummary) error {
@@ -363,6 +369,12 @@ func (s *Service) ApplyUserCanvasOperations(userID, canvasID string, req CanvasO
 				return err
 			}
 			if !req.TrustedServerMutation {
+				if existing != nil {
+					raw, err = New(tx, nil).repairPurgedCanvasMediaReferences(userID, json.RawMessage(existing.PayloadJSON), raw)
+					if err != nil {
+						return err
+					}
+				}
 				if err := New(tx, nil).ValidateCanvasMediaAssets(userID, raw); err != nil {
 					return err
 				}
@@ -383,7 +395,7 @@ func (s *Service) ApplyUserCanvasOperations(userID, canvasID string, req CanvasO
 			if existing != nil {
 				existingPayload = existing.PayloadJSON
 			}
-			if err := quota(tx, existing == nil, int64(len(raw)-len(existingPayload))); err != nil {
+			if err := quota(tx, existing == nil, int64(len(project.PayloadJSON)-len(existingPayload))); err != nil {
 				return err
 			}
 			if err := tx.UpsertCanvasProject(&project); err != nil {
@@ -391,11 +403,7 @@ func (s *Service) ApplyUserCanvasOperations(userID, canvasID string, req CanvasO
 			}
 			result = UserDataSummary{ID: project.ID, Title: project.Title, CreatedAt: project.CreatedAt, UpdatedAt: project.UpdatedAt, Revision: project.Revision,
 				SaveAudit: &CanvasSaveAudit{NodesBefore: canvasNodeCount(existingPayload), NodesAfter: canvasNodeCount(project.PayloadJSON)}}
-			document, err := canvasProjectPayload(project)
-			if err != nil {
-				return err
-			}
-			encoded, err := json.Marshal(canvasMutationReceiptResult{Summary: result, Document: document})
+			encoded, err := json.Marshal(canvasMutationReceiptResult{Summary: result})
 			if err != nil {
 				return err
 			}
@@ -443,6 +451,7 @@ func (s *Service) upsertUserCanvasProjectWithHistory(userID string, raw json.Raw
 	if err != nil {
 		return UserDataSummary{}, err
 	}
+	raw = json.RawMessage(project.PayloadJSON)
 	var audit CanvasSaveAudit
 	err = s.host.WithStorageLock(func() error {
 		if err := s.ValidateCanvasMediaAssets(userID, raw); err != nil {
@@ -515,6 +524,11 @@ func (s *Service) upsertUserCanvasProjectWithHistory(userID string, raw json.Raw
 
 func (s *Service) DeleteUserCanvasProject(userID string, id string) error {
 	err := s.repo.DeleteCanvasProject(userID, id)
+	var busy *repository.CanvasAgentBusyError
+	if errors.As(err, &busy) {
+		return &kernel.AppError{Status: 409, Code: 409, Reason: "canvas_agent_busy", Message: "画布 Agent 仍在执行或收尾，请先停止并等待任务完成后再删除",
+			Details: map[string]any{"canvasId": id, "agent": busy.Activity}}
+	}
 	if errors.Is(err, repository.ErrCanvasEditLease) {
 		return canvasMutationError("canvas_edit_lease_conflict", err.Error())
 	}
@@ -581,6 +595,11 @@ func canvasProjectFromJSON(userID string, raw json.RawMessage) (model.CanvasProj
 }
 
 func canvasProjectFromJSONWithValidation(userID string, raw json.RawMessage, validate bool) (model.CanvasProject, error) {
+	canonical, _, err := canvasdoc.Canonicalize(raw)
+	if err != nil {
+		return model.CanvasProject{}, kernel.BadAuthRequest(err.Error())
+	}
+	raw = canonical
 	if validate {
 		if err := ValidateSyncedPayload(raw, "画布"); err != nil {
 			return model.CanvasProject{}, err

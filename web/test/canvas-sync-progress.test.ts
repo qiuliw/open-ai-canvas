@@ -45,7 +45,13 @@ export const fixtureWindow = {
 };
 const remoteFor = id => id === "canvas" ? fixture.remoteState?.project ?? fixture.remote : fixture.remoteById.get(id);
 const setRemote = (id, project) => { if (id === "canvas") { fixture.remote = project; if (fixture.remoteState) fixture.remoteState.project = project; } fixture.remoteById.set(id, project); };
-export const useCanvasStore = createStore((set, get) => ({ projects: [], openProject: id => get().projects.find(project => project.id === id) }));
+// These fixtures are persisted canvases; draft behavior is covered by canvas-draft-persistence.test.ts.
+export const useCanvasStore = createStore((set, get) => ({
+    projects: [],
+    openProject: id => get().projects.find(project => project.id === id),
+    getDraftProject: () => null,
+    materializeDraft: () => {},
+}));
 export const useAssetStore = createStore(() => ({ assets: [] }));
 export const getActiveUserScope = () => fixture.scope;
 export const localForageStorageForScope = () => ({ getItem: async key => fixture.data.get(key) ?? null, setItem: async (key, value) => { await fixture.saveHook?.(key, value); if (fixture.setError) throw fixture.setError; fixture.data.set(key, value); }, removeItem: async key => { fixture.data.delete(key); } });
@@ -55,6 +61,7 @@ export const getGenerationAssetDefaults = () => undefined;
 export const appQueryClient = { invalidateQueries: async () => {} };
 export const repairMissingCanvasAssets = () => ({ createdAssets: 0, updatedProjects: 0 });
 export const rebindInconsistentCanvasAssets = () => ({ createdAssets: 0, updatedProjects: 0, reboundNodes: 0 });
+export const canvasPromptAssetMentionIds = text => [...new Set([...String(text).matchAll(/@\\[asset:([^\\]]+)\\]/g)].map(match => match[1]).filter(id => id === id.trim()))];
 export class ApiError extends Error { retryable = false; constructor(message, options = {}) { super(message); Object.assign(this, options); } }
 export const apiBaseURL = "/api";
 const unexpected = () => { throw new Error("unexpected dependency call"); };
@@ -176,7 +183,8 @@ const journalKey = "yingce:canvas-mutation-journal";
 const journal = () => JSON.parse(fixture.data.get(journalKey) ?? "[]");
 
 async function twoDevices() {
-    sync.resetRemoteUserDataSync(); peerSync.resetRemoteUserDataSync();
+    sync.resetRemoteUserDataSync();
+    peerSync.resetRemoteUserDataSync();
     const project = base();
     delete project.nodes[0]!.metadata!.assetId;
     project.nodes[0]!.metadata!.prompt = "场景：";
@@ -187,8 +195,11 @@ async function twoDevices() {
         if (server.lease && server.lease.expires <= now) server.lease = undefined;
         const matches = server.lease?.sessionId === proof.sessionId && server.lease.token === proof.token;
         const LeaseError = proof.sessionId.startsWith("device-b") ? peer.ApiError : ApiError;
-        if (server.lease && !matches || action !== "acquire" && !matches) throw new LeaseError("another device owns the lease", { status: 409, reason: "canvas_edit_lease_conflict" });
-        if (action === "release") { server.lease = undefined; return { serverTime: new Date(now).toISOString() }; }
+        if ((server.lease && !matches) || (action !== "acquire" && !matches)) throw new LeaseError("another device owns the lease", { status: 409, reason: "canvas_edit_lease_conflict" });
+        if (action === "release") {
+            server.lease = undefined;
+            return { serverTime: new Date(now).toISOString() };
+        }
         server.lease ??= { sessionId: proof.sessionId, token: `token-${++server.sequence}`, expires: now + 30000 };
         server.lease.expires = now + 30000;
         return { serverTime: new Date(now).toISOString(), token: server.lease.token, lease: { nodeId: "image", sessionId: proof.sessionId, expiresAt: new Date(now + 30000).toISOString() } };
@@ -198,15 +209,24 @@ async function twoDevices() {
         return createCanvasEditLeaseClient({ now: () => now, scope: () => "sync-test-user", sessionId: () => `${device}-${++session}`, change });
     });
     const checkLeases = (before: CanvasProject, after: CanvasProject, request: { editProofs?: { nodeId: string; sessionId: string; token: string }[] }) => {
-        const beforePrompt = before.nodes[0]?.metadata?.prompt, afterPrompt = after.nodes[0]?.metadata?.prompt;
+        const beforePrompt = before.nodes[0]?.metadata?.prompt,
+            afterPrompt = after.nodes[0]?.metadata?.prompt;
         if (beforePrompt === afterPrompt) return;
-        if (!server.lease || !request.editProofs?.some((proof) => proof.nodeId === "image" && proof.sessionId === server.lease?.sessionId && proof.token === server.lease.token)) throw new ApiError("invalid proof", { status: 409, reason: "canvas_edit_lease_conflict" });
+        if (!server.lease || !request.editProofs?.some((proof) => proof.nodeId === "image" && proof.sessionId === server.lease?.sessionId && proof.token === server.lease.token))
+            throw new ApiError("invalid proof", { status: 409, reason: "canvas_edit_lease_conflict" });
     };
-    setLeaseClient(clients[0]); peer.setLeaseClient(clients[1]);
+    setLeaseClient(clients[0]);
+    peer.setLeaseClient(clients[1]);
     for (const device of [fixture, peer.fixture]) {
-        device.data.clear(); device.remoteState = server; device.checkLeases = checkLeases;
-        device.manualTimers = true; device.timers.clear(); device.proofError = undefined;
-        device.writes = []; device.writesById.clear(); device.errors.clear();
+        device.data.clear();
+        device.remoteState = server;
+        device.checkLeases = checkLeases;
+        device.manualTimers = true;
+        device.timers.clear();
+        device.proofError = undefined;
+        device.writes = [];
+        device.writesById.clear();
+        device.errors.clear();
         device.afterPostHook = device.postHook = device.setError = device.saveHook = undefined;
         device.flushError = device.beforeFlush = undefined;
         device.scope = "sync-test-user";
@@ -220,12 +240,20 @@ async function twoDevices() {
         expect(clients[index]!.input("canvas", "image")).toBe(true);
         store.setState((state: { projects: CanvasProject[] }) => ({ projects: state.projects.map((item) => ({ ...item, nodes: item.nodes.map((node) => ({ ...node, metadata: { ...node.metadata, prompt: node.metadata?.prompt + suffix } })) })) }));
     };
-    return { server, clients, type, time: (value: number) => { now = value; } };
+    return {
+        server,
+        clients,
+        type,
+        time: (value: number) => {
+            now = value;
+        },
+    };
 }
 
 test("两端在两秒轮询前同时输入：拒绝端保持可编辑，定时自动交接并收敛，不出现错误状态或新画布", async () => {
     const { server, clients, type } = await twoDevices();
-    type(0, "甲"); type(1, "乙");
+    type(0, "甲");
+    type(1, "乙");
     await expect(peerSync.saveRemoteUserDataNow("canvas")).rejects.toThrow("another device owns the lease");
     expect(peerProgress.useSyncProgressStore.getState().syncingProjects.canvas.errorKind).toBeUndefined();
     clients[1]!.status("canvas", { revision: 7, serverTime: new Date(0).toISOString(), leases: [{ nodeId: "image", sessionId: "device-a", expiresAt: new Date(30000).toISOString() }] });
@@ -243,8 +271,10 @@ test("两端在两秒轮询前同时输入：拒绝端保持可编辑，定时�
     await sync.refreshCanvasAfterAgent("canvas", "sync");
     expect(live().nodes[0]!.metadata!.prompt).toBe("场景：甲乙丙");
     const writes = fixture.writes.length + peer.fixture.writes.length;
-    await sync.saveRemoteUserDataNow("canvas"); await peerSync.saveRemoteUserDataNow("canvas");
-    await sync.refreshCanvasAfterAgent("canvas", "sync"); await peerSync.refreshCanvasAfterAgent("canvas", "sync");
+    await sync.saveRemoteUserDataNow("canvas");
+    await peerSync.saveRemoteUserDataNow("canvas");
+    await sync.refreshCanvasAfterAgent("canvas", "sync");
+    await peerSync.refreshCanvasAfterAgent("canvas", "sync");
     expect(fixture.writes.length + peer.fixture.writes.length).toBe(writes);
     expect(useCanvasStore.getState().projects.map((project) => project.id)).toEqual(["canvas"]);
     expect(peer.useCanvasStore.getState().projects.map((project: CanvasProject) => project.id)).toEqual(["canvas"]);
@@ -252,8 +282,12 @@ test("两端在两秒轮询前同时输入：拒绝端保持可编辑，定时�
 
 test("双端持续输入期间也交出写入租约，保存途中新输入进入后续批次", async () => {
     const { server, type } = await twoDevices();
-    type(0, "甲"); type(1, "乙");
-    fixture.afterPostHook = () => { fixture.afterPostHook = undefined; type(0, "新"); };
+    type(0, "甲");
+    type(1, "乙");
+    fixture.afterPostHook = () => {
+        fixture.afterPostHook = undefined;
+        type(0, "新");
+    };
     await sync.saveRemoteUserDataNow("canvas");
     expect(server.lease).toBeUndefined();
     await peerSync.saveRemoteUserDataNow("canvas");
@@ -264,8 +298,12 @@ test("双端持续输入期间也交出写入租约，保存途中新输入进�
 
 test("已提交但响应丢失时，轮询和刷新先保留 journal，重放 receipt 不重复合入自己的输入", async () => {
     const { server, type } = await twoDevices();
-    type(0, "甲"); type(1, "乙");
-    fixture.afterPostHook = () => { fixture.afterPostHook = undefined; throw new Error("response lost"); };
+    type(0, "甲");
+    type(1, "乙");
+    fixture.afterPostHook = () => {
+        fixture.afterPostHook = undefined;
+        throw new Error("response lost");
+    };
     await expect(sync.saveRemoteUserDataNow("canvas")).rejects.toThrow("response lost");
     const original = structuredClone(journal()[0].request);
     type(0, "新");
@@ -284,7 +322,8 @@ test("已提交但响应丢失时，轮询和刷新先保留 journal，重放 re
 
 test("合并缓存写入失败后另一端又输入，重建请求使用 journal 的新基线，不重复云端文字", async () => {
     const { server, type, time } = await twoDevices();
-    type(0, "甲"); type(1, "乙");
+    type(0, "甲");
+    type(1, "乙");
     await sync.saveRemoteUserDataNow("canvas");
     peer.fixture.flushError = new Error("cache unavailable");
     await expect(peerSync.saveRemoteUserDataNow("canvas")).rejects.toThrow("cache unavailable");
@@ -299,7 +338,8 @@ test("合并缓存写入失败后另一端又输入，重建请求使用 journal
 
 test("新 journal 落盘但投影缓存尚未写入就刷新，后续输入先接上投影再重放", async () => {
     const { server, type, time } = await twoDevices();
-    type(0, "甲"); type(1, "乙");
+    type(0, "甲");
+    type(1, "乙");
     await sync.saveRemoteUserDataNow("canvas");
     peer.fixture.saveHook = (key: string, value: string) => {
         const pending = JSON.parse(value);
@@ -408,7 +448,10 @@ beforeEach(async () => {
     await markConfirmedFixtureSnapshots();
     await sync.initializeRemoteUserDataSession("sync-test-user");
 });
-afterEach(() => { sync.resetRemoteUserDataSync(); peerSync.resetRemoteUserDataSync(); });
+afterEach(() => {
+    sync.resetRemoteUserDataSync();
+    peerSync.resetRemoteUserDataSync();
+});
 afterAll(() => {
     if (!resolve(dir).startsWith(resolve(tmpdir()) + sep)) throw new Error("unexpected fixture directory");
     rmSync(dir, { recursive: true, force: true });
@@ -466,7 +509,43 @@ describe("定向保存与旧 journal 的真实同步集成", () => {
         expect(fixture.reads).toBe(0);
     });
 
-    test.each([{ status: 400 }, { status: 422 }, { status: 409, reason: "canvas_mutation_id_reused" }])("未识别的拒绝保留当前编辑和原请求，不伪报成功：%j", async (options) => {
+    test("请求 ID 已被另一份内容占用时按 journal 基线重建新请求，不永久卡在重放", async () => {
+        fixture.manualTimers = true;
+        edit({ title: "Reused id edit" });
+        fixture.errors.set("canvas:1", new ApiError("mutation ID reused", { status: 409, reason: "canvas_mutation_id_reused" }));
+        await sync.saveRemoteUserDataNow("canvas");
+        expect(fixture.writes).toHaveLength(2);
+        expect(fixture.writes[1].mutationId).not.toBe(fixture.writes[0].mutationId);
+        expect(fixture.remote.title).toBe("Reused id edit");
+        expect(live().title).toBe("Reused id edit");
+        expect(journal()).toEqual([]);
+        expect(useSyncProgressStore.getState().syncingProjects.canvas).toMatchObject({ phase: "done", errorKind: undefined });
+    });
+
+    test("瞬时并发写入按原 mutationId 原样重放，不重建基线也不标记冲突", async () => {
+        fixture.manualTimers = true;
+        edit({ title: "Concurrent write edit" });
+        fixture.errors.set("canvas:1", new ApiError("画布正在更新，将自动重放原请求", { status: 409, reason: "canvas_concurrent_write" }));
+        await sync.saveRemoteUserDataNow("canvas");
+        expect(fixture.writes).toHaveLength(2);
+        expect(fixture.writes[1]).toEqual(fixture.writes[0]);
+        expect(fixture.remote.title).toBe("Concurrent write edit");
+        expect(journal()).toEqual([]);
+        expect(useSyncProgressStore.getState().syncingProjects.canvas).toMatchObject({ phase: "done", errorKind: undefined });
+    });
+
+    test("持续并发写入超过重放次数后保留原请求等待后台重试，标记为瞬时而非冲突", async () => {
+        fixture.manualTimers = true;
+        edit({ title: "Busy canvas edit" });
+        for (let write = 1; write <= 4; write++) fixture.errors.set(`canvas:${write}`, new ApiError("busy", { status: 409, reason: "canvas_concurrent_write" }));
+        await expect(sync.saveRemoteUserDataNow("canvas")).rejects.toThrow("busy");
+        expect(fixture.writes).toHaveLength(4);
+        expect(new Set(fixture.writes.map((write) => write.mutationId)).size).toBe(1);
+        expect(journal()).toHaveLength(1);
+        expect(useSyncProgressStore.getState().syncingProjects.canvas).toMatchObject({ phase: "pending", errorKind: "network" });
+    });
+
+    test.each([{ status: 400 }, { status: 422 }])("未识别的拒绝保留当前编辑和原请求，不伪报成功：%j", async (options) => {
         fixture.manualTimers = true;
         edit({ title: "Rejected local edit" });
         fixture.errors.set("canvas:1", new ApiError("rejected", options));
@@ -535,7 +614,9 @@ describe("定向保存与旧 journal 的真实同步集成", () => {
     test("持续冲突有界退出且保留当前编辑与待提交请求，不假报已同步", async () => {
         fixture.manualTimers = true;
         edit({ title: "Current edit" });
-        fixture.postHook = async () => { throw new ApiError("concurrent edit", { status: 409, reason: "canvas_field_conflict" }); };
+        fixture.postHook = async () => {
+            throw new ApiError("concurrent edit", { status: 409, reason: "canvas_field_conflict" });
+        };
         await expect(sync.saveRemoteUserDataNow("canvas")).rejects.toThrow("新修改已保留");
         expect(fixture.writes).toHaveLength(3);
         expect(live().title).toBe("Current edit");
@@ -1104,7 +1185,6 @@ describe("定向保存与旧 journal 的真实同步集成", () => {
     });
 
     test.each([
-        { status: 409, reason: "canvas_concurrent_write" },
         { status: 500, reason: "canvas_field_conflict" },
         { status: 401, reason: "unauthorized" },
         { status: 403, reason: "forbidden" },

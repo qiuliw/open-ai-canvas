@@ -122,7 +122,7 @@ func (r *Repository) ApiCallLogs(userID string, admin bool, limit int) ([]model.
 	if !admin {
 		query = query.Where("user_id = ?", userID)
 	}
-	err := query.Omit("RequestBody", "ResponseBody").Find(&logs).Error
+	err := query.Omit("RequestBody", "ResponseBody", "GenerationContentJSON").Find(&logs).Error
 	return logs, err
 }
 
@@ -147,6 +147,13 @@ func (r *Repository) SystemSettingOptional(key string) (*model.SystemSetting, er
 
 func (r *Repository) SaveSystemSetting(setting *model.SystemSetting) error {
 	return r.db.Save(setting).Error
+}
+
+func (r *Repository) SystemSettingsWithPrefix(prefix string, limit int) ([]model.SystemSetting, error) {
+	var settings []model.SystemSetting
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix)
+	err := r.db.Where(`key LIKE ? ESCAPE '\'`, escaped+"%").Order("updated_at desc").Limit(limit).Find(&settings).Error
+	return settings, err
 }
 
 func (r *Repository) SaveSystemSettings(settings ...*model.SystemSetting) error {

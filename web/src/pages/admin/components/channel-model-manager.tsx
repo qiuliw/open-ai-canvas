@@ -1,29 +1,75 @@
-import { useEffect, useState } from "react";
-import { App, Button, Checkbox, Input, Modal, Popconfirm, Space, Tooltip } from "antd";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { App, Button, Checkbox, Input, Popconfirm, Space } from "antd";
+import { AdminModal } from "@/pages/admin/ui/overlays";
+import { AntTooltip as Tooltip } from "@/components/ui/base/tooltip/ant-tooltip";
 import type { ColumnsType } from "antd/es/table";
-import { Copy, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Copy, Pencil, Plus, Power, RefreshCw, Search, Trash2 } from "lucide-react";
 
 import { PaginationBar } from "@/pages/admin/components/admin-ui";
 import { ModelIcon } from "@/components/model-picker";
 import { modelProtocolDefinition, modelProtocolLabel, type ModelProtocol } from "@/lib/model-protocols";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
-import { deleteAdminChannelModel, deleteAdminChannelModels, fetchAdminChannelModels, importAdminChannelModels, listAdminChannelModels, type ChannelModel } from "@/services/api/wallet";
+import {
+    deleteAdminChannelModel,
+    deleteAdminChannelModels,
+    fetchAdminChannelModels,
+    getAdminChannelCatalogStatus,
+    importAdminChannelModels,
+    listAdminChannelModels,
+    setAdminChannelModelEnabled,
+    type AdminChannelModelHealth,
+    type ChannelModel,
+    type ChannelCatalogDiff,
+    type ChannelCatalogStatus,
+} from "@/services/api/wallet";
+import { ChannelModelHealthCell, channelModelHealthKey } from "./channel-model-health";
 import type { ModelChannel } from "@/stores/use-config-store";
 import { ChannelModelEditor } from "./channel-model-editor";
 import { AdminBatchBar, AdminDataTable, AdminFilterChip, AdminStatusBadge, AdminTableEmpty } from "./admin-ui";
 import { ChannelOrderDialog } from "./channel-order-dialog";
 import { ChannelModelCostSummary } from "./channel-model-cost-summary";
 import { ChannelModelRepriceDialog } from "./channel-model-reprice-dialog";
+import { ChannelModelBatchEditDialog } from "./channel-model-batch-edit-dialog";
 import { deselectVisibleModels, filterImportModels, normalizeFetchModelKey, selectExistingImportModels, selectVisibleModels } from "./channel-model-import-selection";
 import { duplicateChannelModelValues, type ChannelModelFormValues } from "./channel-model-editor-form";
 import { Select } from "@/components/ui/base/select";
 
-export function ChannelModelManager({ channel, onChanged }: { channel: ModelChannel; onChanged: () => void | Promise<void> }) {
+export type ChannelModelFilters = {
+    keyword: string;
+    capability: ChannelModel["capability"] | "all";
+    status: "all" | "enabled" | "disabled" | "unhealthy";
+};
+
+export function ChannelModelManager({
+    channel,
+    onChanged,
+    refreshVersion = 0,
+    health,
+    healthLoading,
+    autoFetch = false,
+    onAutoFetchConsumed,
+    groupHeading,
+    groupActions,
+    filters,
+}: {
+    channel: ModelChannel;
+    onChanged: (propagateError?: boolean) => void | Promise<void>;
+    refreshVersion?: number;
+    health?: Map<string, AdminChannelModelHealth>;
+    healthLoading?: boolean;
+    autoFetch?: boolean;
+    onAutoFetchConsumed?: () => void;
+    groupHeading?: ReactNode;
+    groupActions?: (openSort: () => void) => ReactNode;
+    filters?: ChannelModelFilters;
+}) {
     const { message, modal } = App.useApp();
+    const [togglingId, setTogglingId] = useState<string | null>(null);
     const [items, setItems] = useState<ChannelModel[]>([]);
     const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
     const [deletingSelected, setDeletingSelected] = useState(false);
     const [repriceItems, setRepriceItems] = useState<ChannelModel[]>([]);
+    const [batchEditItems, setBatchEditItems] = useState<ChannelModel[]>([]);
     const [editing, setEditing] = useState<ChannelModel | null>(null);
     const [copyDraft, setCopyDraft] = useState<ChannelModelFormValues | null>(null);
     const [loading, setLoading] = useState(true);
@@ -31,15 +77,25 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
     const [fetching, setFetching] = useState(false);
     const [fetchPreviewOpen, setFetchPreviewOpen] = useState(false);
     const [fetchPreviewModels, setFetchPreviewModels] = useState<string[]>([]);
+    const [catalogDiff, setCatalogDiff] = useState<ChannelCatalogDiff | null>(null);
+    const [catalogStatus, setCatalogStatus] = useState<ChannelCatalogStatus | null>(null);
+    const [catalogStatusError, setCatalogStatusError] = useState("");
+    const fetchSequence = useRef(0);
+    const autoFetchedChannel = useRef<string | null>(null);
     const [selectedFetchModels, setSelectedFetchModels] = useState<string[]>([]);
     const [fetchKeyword, setFetchKeyword] = useState("");
     const [importing, setImporting] = useState(false);
     const [editorOpen, setEditorOpen] = useState(false);
-    const [keyword, setKeyword] = useState("");
-    const [capability, setCapability] = useState<ChannelModel["capability"] | "all">("all");
-    const [status, setStatus] = useState<"all" | "enabled" | "disabled">("all");
+    const [localKeyword, setKeyword] = useState("");
+    const [localCapability, setCapability] = useState<ChannelModelFilters["capability"]>("all");
+    const [localStatus, setStatus] = useState<ChannelModelFilters["status"]>("all");
+    const { keyword, capability, status } = filters ?? { keyword: localKeyword, capability: localCapability, status: localStatus };
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
+    useEffect(() => {
+        setPage(1);
+        setSelectedModelIds([]);
+    }, [filters?.keyword, filters?.capability, filters?.status]);
     const [availableProtocols, setAvailableProtocols] = useState<import("@/lib/model-protocols").ModelProtocolDefinition[]>([]);
     const [protocolLoading, setProtocolLoading] = useState(true);
     const [protocolError, setProtocolError] = useState("");
@@ -55,7 +111,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
             setProtocolLoading(false);
         }
     };
-    const reload = async () => {
+    const reload = async (propagateError = false) => {
         if (!channel) return;
         setLoading(true);
         setLoadError("");
@@ -66,6 +122,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
             setSelectedModelIds((current) => current.filter((id) => availableIDs.has(id)));
         } catch (error) {
             setLoadError(error instanceof Error ? error.message : "读取渠道模型失败");
+            if (propagateError) throw error;
         } finally {
             setLoading(false);
         }
@@ -84,23 +141,65 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
         setCapability("all");
         setStatus("all");
         setPage(1);
-    }, [channel.id]);
+        return () => {
+            fetchSequence.current += 1;
+        };
+    }, [channel.id, refreshVersion]);
 
-    const fetchModels = async () => {
+    useEffect(() => {
+        let active = true;
+        setCatalogStatusError("");
+        void getAdminChannelCatalogStatus(channel.id)
+            .then((status) => {
+                if (active) setCatalogStatus(status);
+            })
+            .catch((error) => {
+                if (active) setCatalogStatusError(error instanceof Error ? error.message : "读取目录状态失败");
+            });
+        return () => {
+            active = false;
+        };
+    }, [channel.id, channel.updatedAt, refreshVersion]);
+
+    useEffect(() => {
+        if (!autoFetch) {
+            autoFetchedChannel.current = null;
+            return;
+        }
+        let active = true;
+        // StrictMode replays mount effects. Consume only the surviving effect,
+        // after its cleanup has invalidated any earlier fetch sequence.
+        queueMicrotask(() => {
+            if (!active || autoFetchedChannel.current === channel.id) return;
+            autoFetchedChannel.current = channel.id;
+            onAutoFetchConsumed?.();
+            void fetchModels(true);
+        });
+        return () => {
+            active = false;
+        };
+    }, [autoFetch, channel.id]);
+
+    const fetchModels = async (afterCreate = false) => {
+        const sequence = ++fetchSequence.current;
         setFetching(true);
         try {
             const result = await fetchAdminChannelModels(channel.id);
-            if (result.models.length === 0) {
-                message.warning("上游没有返回可用模型");
-                return;
-            }
+            if (sequence !== fetchSequence.current) return;
+            setCatalogDiff(result);
+            setCatalogStatus({ models: result.models, readAt: result.readAt, stale: false });
             setFetchPreviewModels(result.models);
-            setSelectedFetchModels(selectExistingImportModels(result.models, items.flatMap((item) => [item.modelKey, item.providerModelKey].filter(Boolean))));
+            setSelectedFetchModels(
+                selectExistingImportModels(
+                    result.models,
+                    items.flatMap((item) => [item.modelKey, item.providerModelKey].filter(Boolean)),
+                ),
+            );
             setFetchPreviewOpen(true);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "拉取模型失败");
+            if (sequence === fetchSequence.current) message.error(`${afterCreate ? "Key 已保存，模型读取失败：" : ""}${error instanceof Error ? error.message : "拉取模型失败"}`);
         } finally {
-            setFetching(false);
+            if (sequence === fetchSequence.current) setFetching(false);
         }
     };
 
@@ -165,6 +264,36 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
         }
     };
 
+    const applyEnabled = async (item: ChannelModel, enabled: boolean) => {
+        setTogglingId(item.id);
+        try {
+            await setAdminChannelModelEnabled(channel.id, item.id, enabled);
+            setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, enabled } : entry)));
+            await onChanged();
+            message.success(enabled ? "模型已启用" : "模型已停用");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "更新模型状态失败");
+        } finally {
+            setTogglingId(null);
+        }
+    };
+
+    // 停用会让新任务不再路由到该模型，需要确认；启用没有破坏性，直接执行。
+    const toggleEnabled = (item: ChannelModel) => {
+        if (!item.enabled) {
+            void applyEnabled(item, true);
+            return;
+        }
+        modal.confirm({
+            title: `停用模型 ${item.displayName || item.modelKey}？`,
+            content: "停用后新任务不再使用该模型，引用它的前台模型会切换到其他可用线路；价格与配置保留，可随时重新启用。",
+            okText: "确认停用",
+            cancelText: "取消",
+            okButtonProps: { danger: true },
+            onOk: () => applyEnabled(item, false),
+        });
+    };
+
     const confirmBatchRemove = () => {
         if (!selectedModelIds.length) return;
         const count = selectedModelIds.length;
@@ -196,7 +325,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
             title: "模型",
             width: 240,
             render: (_, item) => (
-                <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex min-w-0 items-center gap-2">
                     <span className="admin-channel-model-icon">
                         <ModelIcon model={item.modelKey} icon={item.icon} />
                     </span>
@@ -211,7 +340,8 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                 </div>
             ),
         },
-        { title: "能力", dataIndex: "capability", width: 90, render: capabilityLabel },
+        { title: "能力", dataIndex: "capability", width: 80, render: capabilityLabel },
+        { title: "稳定性（24h）", key: "health", width: 150, render: (_, item) => <ChannelModelHealthCell health={health?.get(channelModelHealthKey(channel.id, item.modelKey))} loading={healthLoading} /> },
         {
             title: "请求协议",
             dataIndex: "protocol",
@@ -231,12 +361,15 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
         { title: "状态", dataIndex: "enabled", width: 85, render: (enabled) => <AdminStatusBadge label={enabled ? "启用" : "停用"} tone={enabled ? "success" : "neutral"} /> },
         {
             title: "操作",
-            width: 130,
+            width: 206,
             fixed: "right",
             render: (_, item) => (
                 <Space size={4}>
                     <Button size="small" icon={<Pencil className="size-3.5" />} disabled={deletingSelected} onClick={() => startEdit(item)}>
                         编辑
+                    </Button>
+                    <Button size="small" danger={item.enabled} icon={<Power className="size-3.5" />} loading={togglingId === item.id} disabled={deletingSelected || (togglingId !== null && togglingId !== item.id)} onClick={() => toggleEnabled(item)}>
+                        {item.enabled ? "停用" : "启用"}
                     </Button>
                     <Tooltip title="复制模型">
                         <Button size="small" aria-label={`复制模型 ${item.displayName || item.modelKey}`} disabled={deletingSelected} icon={<Copy className="size-3.5" />} onClick={() => startCopy(item)} />
@@ -255,9 +388,14 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
         if (capability !== "all" && item.capability !== capability) return false;
         if (status === "enabled" && !item.enabled) return false;
         if (status === "disabled" && item.enabled) return false;
+        if (status === "unhealthy") {
+            const stats = health?.get(channelModelHealthKey(channel.id, item.modelKey));
+            if (!stats || stats.successRate24h === null || stats.successRate24h >= 0.8) return false;
+        }
         return true;
     });
-    const pagedItems = filteredItems.slice((page - 1) * pageSize, page * pageSize);
+    const currentPage = Math.min(page, Math.max(1, Math.ceil(filteredItems.length / pageSize)));
+    const pagedItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
     const existingFetchModelKeys = new Set(items.flatMap((item) => [item.modelKey, item.providerModelKey].filter(Boolean).map(normalizeFetchModelKey)));
     const selectedNewFetchModels = selectedFetchModels.filter((name) => !existingFetchModelKeys.has(normalizeFetchModelKey(name)));
     const selectedExistingFetchCount = selectedFetchModels.length - selectedNewFetchModels.length;
@@ -266,33 +404,52 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
     const allVisibleFetchModelsSelected = visibleFetchModels.length > 0 && visibleFetchModels.every((name) => selectedFetchModels.includes(name));
     const selectedVisibleFetchCount = visibleFetchModels.filter((name) => selectedFetchModels.includes(name)).length;
     const fetchModelOptions = visibleFetchModels.map((name) => ({
-        label: <span className="break-all">{name}</span>,
+        label: (
+            <span className="break-all">
+                {name}
+                {catalogDiff?.added?.includes(name) ? " · 新增" : catalogDiff?.retained?.includes(name) ? " · 仍在目录" : ""}
+            </span>
+        ),
         value: name,
     }));
 
     return (
         <div className="admin-channel-model-manager">
+            {catalogStatus?.readAt && (!groupHeading || catalogStatus.stale) && (
+                <p className="px-4 pt-3 text-xs text-foreground/60" role="status">
+                    上次成功读取：{new Date(catalogStatus.readAt).toLocaleString()} · {catalogStatus.models.length} 个模型{catalogStatus.stale ? "。此为旧 Key 或旧地址的结果，请重新读取模型。" : "。目录仅证明可见性。"}
+                </p>
+            )}
+            {catalogStatusError && (
+                <p className="px-4 pt-3 text-xs text-foreground/60" role="alert">
+                    目录状态：{catalogStatusError}
+                </p>
+            )}
             <div className="admin-channel-model-toolbar">
-                <div>
-                    <h3 className="admin-channel-model-heading">
-                        模型管理 <span className="admin-channel-count">{items.length}</span>
-                    </h3>
-                    <p className="admin-channel-model-hint">点击“自定义排序”调整模型展示顺序；规格展示成本价 / 销售价及加价率，勾选模型可统一调价</p>
+                <div className="admin-channel-group-heading">
+                    {groupHeading || <h3 className="admin-channel-model-heading">模型管理</h3>}
+                    <span className="admin-channel-model-count">{loading ? "加载中" : `${filters && (keyword || capability !== "all" || status !== "all") ? `${filteredItems.length} / ` : ""}${items.length} 个模型`}</span>
                 </div>
-                <Space wrap>
+                <Space size={6} wrap>
+                    <Button
+                        loading={fetching}
+                        title={catalogStatus?.readAt ? `上次读取：${new Date(catalogStatus.readAt).toLocaleString()} · ${catalogStatus.models.length} 个模型` : undefined}
+                        icon={<RefreshCw className="size-3.5" />}
+                        onClick={() => void fetchModels()}
+                    >
+                        读取模型
+                    </Button>
+                    <Button icon={<Plus className="size-3.5" />} onClick={startCreate}>
+                        新增模型
+                    </Button>
                     <ChannelOrderDialog
                         channelId={channel.id}
+                        renderTrigger={groupActions}
                         onSaved={async () => {
                             await reload();
                             await onChanged();
                         }}
                     />
-                    <Button loading={fetching} icon={<RefreshCw className="size-4" />} onClick={() => void fetchModels()}>
-                        拉取模型
-                    </Button>
-                    <Button type="primary" icon={<Plus className="size-4" />} onClick={startCreate}>
-                        新增模型
-                    </Button>
                 </Space>
             </div>
             {loadError ? (
@@ -307,21 +464,23 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                 empty={
                     <AdminTableEmpty
                         title={loadError ? "模型列表加载失败" : items.length ? "没有匹配的模型" : "这个渠道还没有模型"}
-                        description={loadError ? "请重试加载，暂时无法确认模型列表。" : items.length ? "调整搜索或筛选条件后重试。" : "点击上方“拉取模型”从上游导入，或手动新增模型。"}
+                        description={loadError ? "请重试加载，暂时无法确认模型列表。" : items.length ? "调整搜索或筛选条件后重试。" : "点击“读取模型”导入，或手动新增。"}
                     />
                 }
                 toolbar={
-                    <Input
-                        allowClear
-                        className="app-list-search"
-                        prefix={<Search className="size-4 text-foreground/40" />}
-                        value={keyword}
-                        placeholder="搜索模型标识或显示名称"
-                        onChange={(event) => {
-                            setKeyword(event.target.value);
-                            setPage(1);
-                        }}
-                    />
+                    filters ? undefined : (
+                        <Input
+                            allowClear
+                            className="app-list-search"
+                            prefix={<Search className="size-4 text-foreground/40" />}
+                            value={keyword}
+                            placeholder="搜索模型标识或显示名称"
+                            onChange={(event) => {
+                                setKeyword(event.target.value);
+                                setPage(1);
+                            }}
+                        />
+                    )
                 }
                 toolbarActiveFilters={
                     <>
@@ -345,7 +504,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                         ) : null}
                         {status !== "all" ? (
                             <AdminFilterChip
-                                label={`状态：${status === "enabled" ? "已启用" : "已停用"}`}
+                                label={`状态：${status === "enabled" ? "已启用" : status === "disabled" ? "已停用" : "成功率低于 80%"}`}
                                 onRemove={() => {
                                     setStatus("all");
                                     setPage(1);
@@ -373,7 +532,8 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                             ]}
                         />
                         <Select
-                            className="w-32"
+                            aria-label="筛选模型状态"
+                            className="w-44"
                             value={status}
                             onChange={(value) => {
                                 setStatus(value);
@@ -383,6 +543,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                                 { label: "全部状态", value: "all" },
                                 { label: "已启用", value: "enabled" },
                                 { label: "已停用", value: "disabled" },
+                                { label: "24h 成功率低于 80%", value: "unhealthy" },
                             ]}
                         />
                     </>
@@ -395,6 +556,9 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                 }}
                 batchActions={
                     <AdminBatchBar count={selectedModelIds.length} onClear={() => setSelectedModelIds([])}>
+                        <Button size="small" disabled={deletingSelected || loading || Boolean(loadError)} onClick={() => setBatchEditItems(items.filter((item) => selectedModelIds.includes(item.id)))}>
+                            批量修改
+                        </Button>
                         <Button size="small" disabled={deletingSelected || loading || Boolean(loadError)} onClick={() => setRepriceItems(items.filter((item) => selectedModelIds.includes(item.id)))}>
                             统一调价
                         </Button>
@@ -420,32 +584,58 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                     columns,
                     dataSource: pagedItems,
                     pagination: false,
-                    scroll: { x: 1090 },
+                    scroll: { x: 1300 },
                 }}
                 footer={
-                    <PaginationBar
-                        alwaysShow
-                        current={page}
-                        pageSize={pageSize}
-                        total={filteredItems.length}
-                        onChange={(nextPage, nextPageSize) => {
-                            setPage(nextPageSize !== pageSize ? 1 : nextPage);
-                            setPageSize(nextPageSize);
-                        }}
-                    />
+                    filteredItems.length > pageSize ? (
+                        <PaginationBar
+                            current={currentPage}
+                            pageSize={pageSize}
+                            total={filteredItems.length}
+                            onChange={(nextPage, nextPageSize) => {
+                                setPage(nextPageSize !== pageSize ? 1 : nextPage);
+                                setPageSize(nextPageSize);
+                            }}
+                        />
+                    ) : undefined
                 }
             />
-            {repriceItems.length > 0 && <ChannelModelRepriceDialog channelId={channel.id} channelName={channel.name} items={repriceItems} onClose={() => setRepriceItems([])} onSaved={async () => {
-                setSelectedModelIds([]);
-                await reload();
-                await onChanged();
-            }} />}
-            <Modal
+            {batchEditItems.length > 0 && (
+                <ChannelModelBatchEditDialog
+                    channelId={channel.id}
+                    items={batchEditItems}
+                    currentItems={items}
+                    contextKey={JSON.stringify([channel.id, refreshVersion, keyword, capability, status])}
+                    protocols={availableProtocols}
+                    protocolLoading={protocolLoading}
+                    protocolError={protocolError}
+                    onClose={() => setBatchEditItems([])}
+                    onSaved={async () => {
+                        setSelectedModelIds([]);
+                        await reload(true);
+                        await onChanged(true);
+                    }}
+                />
+            )}
+            {repriceItems.length > 0 && (
+                <ChannelModelRepriceDialog
+                    channelId={channel.id}
+                    channelName={channel.name}
+                    items={repriceItems}
+                    onClose={() => setRepriceItems([])}
+                    onSaved={async () => {
+                        setSelectedModelIds([]);
+                        await reload();
+                        await onChanged();
+                    }}
+                />
+            )}
+            <AdminModal
                 title="选择要导入的模型"
                 open={fetchPreviewOpen}
                 centered
                 width={720}
-                rootClassName="admin-modal-root admin-model-import-modal"
+                rootClassName="admin-model-import-modal"
                 onCancel={closeFetchPreview}
                 maskClosable={!importing}
                 closable={!importing}
@@ -459,6 +649,18 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                 ]}
             >
                 <div className="space-y-3">
+                    {catalogDiff && (
+                        <div className="rounded-md border border-border p-3 text-sm space-y-1" role="status">
+                            <p>
+                                读取时间：{new Date(catalogDiff.readAt).toLocaleString()} · {catalogDiff.firstRead ? "首次读取" : catalogDiff.baselineReset ? "Key 或连接变化，已重新建立基线" : "与上次成功读取比较"}
+                            </p>
+                            <p>
+                                新增 {catalogDiff.added?.length || 0} · 仍在目录 {catalogDiff.retained?.length || 0} · 本次未返回 {catalogDiff.missing?.length || 0}
+                            </p>
+                            {Boolean(catalogDiff.missing?.length) && <p className="break-words">本次未返回：{catalogDiff.missing.join("、")}。不代表确认下架，已有模型配置和启用状态保留。</p>}
+                            <p className="text-xs text-foreground/50">目录可见不代表能够生成；协议、能力参数及价格仍按本组单独配置。</p>
+                        </div>
+                    )}
                     <p className="m-0 text-sm text-foreground/65">上游共返回 {fetchPreviewModels.length} 个模型。默认勾选已存在的模型，新模型默认不勾选；可批量全选或取消全选，已存在的模型不会重复导入。</p>
                     <Input
                         allowClear
@@ -477,18 +679,10 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                             {fetchKeywordQuery ? `，当前匹配 ${visibleFetchModels.length} 个（其中 ${selectedVisibleFetchCount} 个已勾选）` : ""}
                         </span>
                         <Space size={4}>
-                            <Button
-                                size="small"
-                                disabled={importing || !visibleFetchModels.length || allVisibleFetchModelsSelected}
-                                onClick={() => setSelectedFetchModels((current) => selectVisibleModels(current, visibleFetchModels))}
-                            >
+                            <Button size="small" disabled={importing || !visibleFetchModels.length || allVisibleFetchModelsSelected} onClick={() => setSelectedFetchModels((current) => selectVisibleModels(current, visibleFetchModels))}>
                                 {fetchKeywordQuery ? `全选匹配的 ${visibleFetchModels.length} 个` : "全选"}
                             </Button>
-                            <Button
-                                size="small"
-                                disabled={importing || selectedVisibleFetchCount === 0}
-                                onClick={() => setSelectedFetchModels((current) => deselectVisibleModels(current, visibleFetchModels))}
-                            >
+                            <Button size="small" disabled={importing || selectedVisibleFetchCount === 0} onClick={() => setSelectedFetchModels((current) => deselectVisibleModels(current, visibleFetchModels))}>
                                 {fetchKeywordQuery ? "取消选中匹配的" : "取消全选"}
                             </Button>
                         </Space>
@@ -503,9 +697,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                                 onChange={(values) => setSelectedFetchModels(values as string[])}
                             />
                         ) : (
-                            <p className="m-0 py-6 text-center text-sm text-foreground/55">
-                                没有匹配「{fetchKeyword.trim()}」的模型
-                            </p>
+                            <p className="m-0 py-6 text-center text-sm text-foreground/55">没有匹配「{fetchKeyword.trim()}」的模型</p>
                         )}
                     </div>
                     <div className="text-xs text-foreground/50">
@@ -513,7 +705,7 @@ export function ChannelModelManager({ channel, onChanged }: { channel: ModelChan
                         {selectedExistingFetchCount > 0 ? `，另有 ${selectedExistingFetchCount} 个已存在模型已勾选` : ""}
                     </div>
                 </div>
-            </Modal>
+            </AdminModal>
             {editorOpen && (
                 <ChannelModelEditor
                     channel={channel}

@@ -62,7 +62,8 @@ const MotionBox = ({ children, className, style }: any) => (
 );
 mock.module("motion/react", () => ({ AnimatePresence: ({ children }: any) => children, motion: { aside: MotionBox, div: MotionBox }, useReducedMotion: () => true }));
 mock.module("antd", () => ({
-    App: { useApp: () => ({ message: { info: silent, error: silent } }) },
+    App: { useApp: () => ({ message: { info: silent, error: silent, warning: silent, success: silent } }) },
+    Dropdown: ({ children }: any) => children,
     Button: ({ children, loading: _loading, icon, size: _size, ...props }: any) => (
         <button {...props}>
             {icon}
@@ -180,7 +181,10 @@ mock.module("@/components/canvas/canvas-cloud-agent-panel-parts", () => ({
     },
 }));
 mock.module("@/components/canvas/canvas-agent-skill-library-modal", () => ({ CanvasAgentSkillLibraryModal: () => null }));
-mock.module("@/components/canvas/canvas-cloud-agent-settings", () => ({ CanvasCloudAgentSettings: () => null }));
+mock.module("@/components/skills/skill-recommendations-modal", () => ({ SkillRecommendationsModal: () => null }));
+mock.module("@/components/canvas/canvas-cloud-agent-settings", () => ({ CanvasCloudAgentSettings: () => null, agentPermissionLabel: (mode: string) => mode }));
+mock.module("@/components/canvas/canvas-cloud-agent-composer", () => ({ AgentContextChip: () => null }));
+mock.module("@/services/cloud-agent-outbox", () => ({ loadCloudAgentOutbox: async () => null, saveCloudAgentOutbox: async () => {}, clearCloudAgentOutbox: async () => {} }));
 mock.module("@/components/canvas/canvas-cloud-agent-connectors", () => ({ AgentConnectorsBar: () => null }));
 mock.module("@/components/canvas/use-agent-panel-layout", () => ({ useAgentPanelLayout: () => ({ style: {}, pointerHandlers: {}, reset: silent, onResizeKeyDown: silent }) }));
 
@@ -214,6 +218,12 @@ const focus = async () => {
     await act(async () => {
         window.dispatchEvent(new Event("focus"));
         await settle();
+    });
+};
+// 面板合并写入本机对话缓存；断言缓存前先触发与页面隐藏相同的立即写入（缓存 mock 同步落盘）。
+const persist = async () => {
+    await act(async () => {
+        window.dispatchEvent(new Event("pagehide"));
     });
 };
 async function mount(initial: CloudAgentConversation, cloud: CloudAgentConversation[], initialPending: CloudAgentPendingSubmission | null = null) {
@@ -278,6 +288,7 @@ test("手机空缓存接续同画布桌面会话，审批被另一端处理后�
             observation.event({ eventId: "status", runId: "desktop", seq: 6, type: "run_status", payload: { status: "running", revision: 2 }, createdAt: waiting.updatedAt });
         });
         expect(conversationUI.approval).toBeNull();
+        await persist();
         expect(local.find((item) => item.id === "server")?.lastEventSeq).toBe(6);
         expect(generated).toBe(0);
     } finally {
@@ -325,9 +336,11 @@ test("云端发现不能替换未提交草稿，明确新建后不会重新接�
             await settle();
         });
         expect(composer.prompt).toBe("");
+        await persist();
         expect(local.some((item) => item.id === "phone-draft" && item.draft === "尚未发送的草稿")).toBe(true);
         await focus();
         expect(conversationUI.messages).toHaveLength(0);
+        await persist();
         expect(local.find((item) => item.id === activeId)?.localNewCanvasId).toBe("shared-canvas");
         expect(generated).toBe(0);
     } finally {
@@ -355,6 +368,7 @@ test("旧账号云端请求迟到时不得写入已切换账号的面板", async
             await settle();
         });
         expect(conversationUI.messages.map((item: any) => item.text)).not.toContain("结果-secret");
+        await persist();
         expect(local.some((item) => item.serverConversationId === "shared-session")).toBe(false);
     } finally {
         await mounted.close();
@@ -377,6 +391,7 @@ test("手选同画布较早历史后不被其他会话抢走，但仍能跟随�
         });
         await focus();
         expect(conversationUI.messages.map((item: any) => item.text)).toContain("结果-earlier");
+        await persist();
         expect(local.find((item) => item.id === activeId)?.localSelectedCanvasId).toBe("shared-canvas");
         remote = [{ ...earlier, run: { ...makeRun("earlier-child"), parentId: "earlier" }, messages: [{ id: "new-result", role: "assistant", text: "所选会话的新轮次" }] }, newer];
         await focus();
@@ -395,6 +410,7 @@ test("未知提交的原请求与幂等身份保留，不能因发现云端同�
         expect(pending).toEqual(original);
         expect(composer.prompt).toBe("生成森林");
         expect(conversationUI.messages).toHaveLength(0);
+        await persist();
         expect(activeId).toBe("uncertain");
         expect(generated).toBe(0);
     } finally {
@@ -472,6 +488,7 @@ test("同名多渠道不能自动换到默认收费模型，手动选择后才�
         await focus();
         expect(controls.selectedModel).toBe("");
         expect(composer.submitDisabled).toBe(true);
+        await persist();
         expect(local.find((item) => item.id === activeId)?.model).toBe("local-agent-test");
         await act(async () => {
             composer.onPromptChange("等待确认渠道的草稿");
@@ -535,6 +552,7 @@ test("同轮历史已追赶到新水位后，延迟的旧 SSE delta 不会再次
             observation.event({ eventId: "new-seven", runId: "streaming", seq: 7, type: "assistant_delta", payload: { messageId: "live-answer", text: "新内容" }, createdAt: current.updatedAt });
         });
         expect(conversationUI.messages.find((item: any) => item.id === "live-answer")?.text).toBe("完整回答新内容");
+        await persist();
         expect(local.find((item) => item.id === activeId)?.lastEventSeq).toBe(7);
         expect(generated).toBe(0);
     } finally {
@@ -639,6 +657,72 @@ test("原样重试未知 POST 后得到明确 stale_parent 可解除旧身份，
     }
 });
 
+test("思考期间快速切换模型只改变下一轮设置，当前订阅和历史连续", async () => {
+    const current = chat("local", { ...makeRun("thinking", "running"), model: "paid-model" });
+    const mounted = await mount(current, [current]);
+    try {
+        const observation = subscriptions.at(-1)!;
+        const subscriptionCount = subscriptions.length;
+        for (const model of ["local-test::local-agent-test", "paid-channel::paid-model", "local-test::local-agent-test"]) {
+            await act(async () => controls.onModelChange(model));
+        }
+        expect(controls.selectedModel).toBe("local-test::local-agent-test");
+        expect(subscriptions).toHaveLength(subscriptionCount);
+        expect(observation.closed).toBe(false);
+        await act(async () => {
+            observation.event({ eventId: "thinking:5", runId: "thinking", seq: 5, type: "assistant_delta", payload: { messageId: "thinking-answer", text: "思考中的模型继续回答" }, createdAt: current.updatedAt });
+        });
+        expect(conversationUI.messages.some((item: any) => item.text === "结果-thinking")).toBe(true);
+        expect(conversationUI.messages.find((item: any) => item.id === "thinking-answer")?.text).toBe("思考中的模型继续回答");
+        await persist();
+        expect(local.find((item) => item.id === activeId)?.run).toMatchObject({ id: "thinking", status: "running", model: "paid-model" });
+        expect(sent).toHaveLength(0);
+        expect(generated).toBe(0);
+    } finally {
+        await mounted.close();
+    }
+});
+
+test("提交等待与未确认重试之间切换模型，原请求正文、渠道和幂等键保持冻结", async () => {
+    const initial = chat("original", makeRun("first"));
+    const mounted = await mount(initial, [initial]);
+    let release: ((value: unknown) => void) | undefined;
+    try {
+        capabilitiesOverride = () => new Promise((resolve) => (release = resolve));
+        sendFailure = new TypeError("network failed after POST");
+        await act(async () => composer.onPromptChange("冻结提交时选择的模型"));
+        await act(async () => {
+            composer.onSubmit();
+            await settle();
+        });
+        expect(release).toBeDefined();
+        await act(async () => controls.onModelChange("local-test::local-agent-test"));
+        await act(async () => {
+            release!({ permissionModes: ["request_approval"], skills: true });
+            await settle();
+        });
+        expect(sendInputs).toHaveLength(1);
+        const frozen = structuredClone(sendInputs[0]);
+        expect(frozen).toMatchObject({ model: "paid-model", channelId: "paid-channel", channelModelKey: "paid-model", prompt: "冻结提交时选择的模型" });
+        expect(pending?.request).toEqual(frozen);
+        expect(composer.prompt).toBe("冻结提交时选择的模型");
+        await act(async () => controls.onModelChange("paid-channel::paid-model"));
+        await act(async () => controls.onModelChange("local-test::local-agent-test"));
+        sendFailure = undefined;
+        await act(async () => {
+            composer.onSubmit();
+            await settle();
+        });
+        expect(sent).toEqual(["first", "first"]);
+        expect(sendInputs[1]).toEqual(frozen);
+        expect(pending).toBeNull();
+        expect(generated).toBe(0);
+    } finally {
+        release?.({ permissionModes: ["request_approval"], skills: true });
+        await mounted.close();
+    }
+});
+
 test("手动重新打开当前云端历史时同步水位，旧 SSE 缓冲不会重复正文", async () => {
     const current = chat("local", makeRun("same-current"));
     const mounted = await mount(current, [current]);
@@ -658,6 +742,7 @@ test("手动重新打开当前云端历史时同步水位，旧 SSE 缓冲不会
             observation.event({ eventId: "history-delayed-five", runId: "same-current", seq: 5, type: "assistant_delta", payload: { messageId: "manual-history-answer", text: "重复内容" }, createdAt: current.updatedAt });
         });
         expect(conversationUI.messages.find((item: any) => item.id === "manual-history-answer")?.text).toBe("手动恢复的完整回复");
+        await persist();
         expect(local.find((item) => item.id === activeId)?.lastEventSeq).toBe(6);
         expect(generated).toBe(0);
     } finally {

@@ -38,6 +38,7 @@ func TestSaveAdminChannelModelCascadesUpstreamKeyToMatchingTiers(t *testing.T) {
 
 	// 管理端表单会把已存档位键原样回传（统一价格档的上游键字段不可见），重命名顶层上游键。
 	renamed, err := svc.SaveAdminChannelModel(admin, channel.ID, first.ID, ChannelModelRequest{
+		ExpectedUpdatedAt: first.UpdatedAt, ExpectedPriceVersion: first.PriceVersion,
 		ModelKey: "deepseek-v4.1-flash", ProviderModelKey: "deepseek-v4.1-flash", DisplayName: "deepseek-v4.1-flash",
 		Capability: "text", Protocol: string(model.ChannelInterfaceChatCompletion),
 		CapabilityConfig: DefaultModelCapabilityConfigForModel(string(model.ChannelInterfaceChatCompletion), "deepseek-v4.1-flash"),
@@ -84,6 +85,7 @@ func TestRenamedUpstreamKeyReachesSystemChannelRequests(t *testing.T) {
 		t.Fatalf("initial save failed: %v", err)
 	}
 	if _, err := svc.SaveAdminChannelModel(admin, channel.ID, first.ID, ChannelModelRequest{
+		ExpectedUpdatedAt: first.UpdatedAt, ExpectedPriceVersion: first.PriceVersion,
 		ModelKey: "deepseek-v4.1-flash", ProviderModelKey: "deepseek-v4.1-flash", DisplayName: "deepseek-v4.1-flash",
 		Capability: "text", Protocol: string(model.ChannelInterfaceChatCompletion),
 		CapabilityConfig: DefaultModelCapabilityConfigForModel(string(model.ChannelInterfaceChatCompletion), "deepseek-v4.1-flash"),
@@ -94,7 +96,7 @@ func TestRenamedUpstreamKeyReachesSystemChannelRequests(t *testing.T) {
 	}
 
 	// 用户在画布 Agent 选中新模型发起任务；config 形状与 cloud_agent.go 组装一致。
-	resolved, err := svc.resolveSystemChannelModelSelection(map[string]any{
+	resolved, err := svc.resolveSystemChannelModelSelection(testGroupAccess(svc), map[string]any{
 		"config": map[string]any{"channelId": channel.ID, "model": "deepseek-v4.1-flash", "channelModelKey": "deepseek-v4.1-flash"},
 	}, "canvas_text", "")
 	if err != nil {

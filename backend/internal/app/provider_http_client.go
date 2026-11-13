@@ -235,6 +235,8 @@ func doJSON(req *http.Request, target interface{}) error {
 	return nil
 }
 
+type providerProxyURLKey struct{}
+
 func doBinary(req *http.Request) ([]byte, string, error) {
 	return doBinaryWithConsumer(req, nil)
 }
@@ -257,7 +259,7 @@ func doBinaryWithConsumer(req *http.Request, onChunk func(string, []byte)) ([]by
 	cacheManagementRequest := requestKind == "cache-create" || requestKind == "cache-delete"
 	responseLimit := maxProviderResponseBytes
 	channelID := ""
-	channelProxyURL := ""
+	channelProxyURL, _ := req.Context().Value(providerProxyURLKey{}).(string)
 	if metadata, ok := req.Context().Value(providerAnalyticsKey{}).(providerAnalyticsContext); ok && metadata.Service != nil {
 		runtimeService = metadata.Service
 		coordinator = metadata.Service.coordinator
@@ -436,6 +438,9 @@ func recordProviderRequest(req *http.Request, startedAt time.Time, statusCode in
 		ErrorCode: errorCode, Error: errorText, ConcurrencyLimit: metadata.ConcurrencyLimit, UpstreamURL: req.URL.Scheme + "://" + req.URL.Host + req.URL.Path,
 		ProviderRequestID: metadata.ProviderRequestID, RequestContentType: req.Header.Get("Content-Type"), RequestBody: requestPayloadForLog(req), ResponseBody: SanitizeAPICallPayload(responseBody, ""),
 	}
+	if requestKind == "create" {
+		callLog.GenerationContentJSON = metadata.GenerationContentJSON
+	}
 	channelSlotFailure := false
 	if code, message := ChannelSlotFailureDetails(requestErr); code != "" {
 		channelSlotFailure = true
@@ -469,7 +474,7 @@ func providerRequestIsBillable(method, requestKind string) bool {
 		return false
 	}
 	switch requestKind {
-	case "cancel", "cache-create", "cache-delete":
+	case "cancel", "cache-create", "cache-delete", "upload":
 		return false
 	default:
 		return true

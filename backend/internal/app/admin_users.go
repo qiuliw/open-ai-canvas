@@ -29,7 +29,7 @@ func (s *Service) AdminUsers(actor *model.User, query AdminListQuery) (*AdminUse
 		return nil, err
 	}
 	page, limit := normalizeAdminPage(query.Page, query.Limit)
-	users, total, err := s.repo.AdminUsers(query.Keyword, model.UserRole(query.Type), model.UserStatus(query.Status), limit, (page-1)*limit)
+	users, total, err := s.repo.AdminUsers(query.Keyword, model.UserRole(query.Type), model.UserStatus(query.Status), strings.ToLower(strings.TrimSpace(query.Group)), limit, (page-1)*limit)
 	if err != nil {
 		return nil, err
 	}
@@ -71,10 +71,21 @@ func (s *Service) AdminUsers(actor *model.User, query AdminListQuery) (*AdminUse
 			groupNameByID[group.ID] = group.Name
 		}
 	}
+	totals, err := s.repo.UserCreditTotals(userIDs)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]AdminUser, 0, len(users))
 	for _, user := range users {
 		account := accountByUserID[user.ID]
-		item := AdminUser{User: user, AvailableMicrocredits: account.AvailableMicrocredits, ReservedMicrocredits: account.ReservedMicrocredits}
+		total := totals[user.ID]
+		item := AdminUser{
+			User:                  user,
+			AvailableMicrocredits: account.AvailableMicrocredits,
+			ReservedMicrocredits:  account.ReservedMicrocredits,
+			RechargedMicrocredits: total.RechargedMicrocredits,
+			ConsumedMicrocredits:  total.ConsumedMicrocredits,
+		}
 		if user.DiscountGroupID != nil {
 			item.DiscountGroupName = groupNameByID[strings.TrimSpace(*user.DiscountGroupID)]
 		}
@@ -173,6 +184,10 @@ func (s *Service) CreateAdminUser(actor *model.User, req CreateAdminUserRequest)
 			return nil, err
 		}
 	}
+	groupCode, err := s.requireExistingUserGroup(req.UserGroup)
+	if err != nil {
+		return nil, err
+	}
 	passwordHash, err := hashPassword(req.Password)
 	if err != nil {
 		return nil, err
@@ -185,6 +200,7 @@ func (s *Service) CreateAdminUser(actor *model.User, req CreateAdminUserRequest)
 		DisplayName:  displayName,
 		Role:         req.Role,
 		Status:       req.Status,
+		UserGroup:    groupCode,
 		PasswordHash: passwordHash,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -298,11 +314,21 @@ func (s *Service) UpdateUser(actor *model.User, userID string, req UpdateUserReq
 	}
 	user.Role = nextRole
 	user.Status = nextStatus
+	if req.IsPromoter != nil {
+		user.IsPromoter = *req.IsPromoter
+	}
+	if req.UserGroup != nil {
+		groupCode, groupErr := s.requireExistingUserGroup(*req.UserGroup)
+		if groupErr != nil {
+			return nil, groupErr
+		}
+		user.UserGroup = groupCode
+	}
 	user.UpdatedAt = time.Now()
 	if err := s.repo.Save(user); err != nil {
 		return nil, err
 	}
-	auditMeta := map[string]any{"role": user.Role, "status": user.Status}
+	auditMeta := map[string]any{"role": user.Role, "status": user.Status, "isPromoter": user.IsPromoter, "userGroup": normalizeUserGroupCode(user.UserGroup)}
 	if user.DiscountGroupID != nil {
 		auditMeta["discountGroupId"] = *user.DiscountGroupID
 	} else if req.DiscountGroupID != nil {

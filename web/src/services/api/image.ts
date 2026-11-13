@@ -5,6 +5,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 import { withOpenAIPromptCacheKey } from "@/lib/openai-prompt-cache";
 import { imageResponseFormatFor, modelCapabilityConfigFor, normalizeImageValue } from "@/lib/model-capabilities";
+import { assertMediaSettings, resolvedMediaConfig } from "@/lib/media-settings";
 import { buildGeminiImageGenerationConfig, parseGeminiImageDataUrl, type GeminiImageGenerationConfig } from "@/lib/gemini-image";
 import { isVolcengineArkImageProtocol } from "@/lib/model-protocols";
 import { aiApiUrl, aiHeaders, imageChannelTransport, postChannelJSON, postGeminiJSON, postVolcengineArkImage } from "@/services/api/image-transport";
@@ -15,6 +16,7 @@ import { normalizeGrokImageResolution, normalizeQuality, normalizeVolcengineArkI
 import { parseGeminiImagePayload, parseImagePayload, readAxiosError } from "@/services/api/image-response";
 import { toChatCompletionMessages, toChatCompletionToolChoice, toClaudeBody, toGeminiBody, toGeminiToolOptions, toResponseInput, toResponseTool, withSystemMessage } from "@/services/api/image-protocols";
 import { requestGeminiStreamingResponse, requestStreamingChatCompletion, requestStreamingClaude, requestStreamingResponse } from "@/services/api/image-streaming";
+import { resolveTextWire } from "@/services/api/text-wire";
 export { buildBackendToolRequests } from "@/services/api/image-protocols";
 export type { AiTextContentPart, AiTextMessage, ResponseFunctionTool, ResponseInputMessage, ResponseToolCall, ToolChoice, ToolResponseResult } from "@/services/api/image-contracts";
 
@@ -57,6 +59,8 @@ async function requestGeminiImagesOnce(config: AiConfig, prompt: string, referen
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const selectedModel = config.model || config.imageModel;
+    assertMediaSettings(config, "image", selectedModel);
+    config = resolvedMediaConfig(config, "image", selectedModel);
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const imageProfile = modelCapabilityConfigFor(config, selectedModel).image!;
     validateImageCapability(imageProfile, []);
@@ -134,6 +138,8 @@ async function grokImageInputURL(image: ReferenceImage) {
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const selectedModel = config.model || config.imageModel;
+    assertMediaSettings(config, "image", selectedModel);
+    config = resolvedMediaConfig(config, "image", selectedModel);
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const imageProfile = modelCapabilityConfigFor(config, selectedModel).image!;
     validateImageCapability(imageProfile, references, mask);
@@ -231,6 +237,16 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
 }
 
+// 文本请求路径按协议的请求格式选择，而不是比较协议 ID：deepseek-chat 等插件声明的是
+// Chat Completions，也要走 /chat/completions。格式未知且协议为空时沿用 Chat Completions，
+// 其他未知协议沿用 Responses。
+async function textRequestRoute(requestConfig: ReturnType<typeof resolveModelRequestConfig>) {
+    const wire = await resolveTextWire(requestConfig);
+    if (wire === "claude-api") return "claude" as const;
+    if (wire === "chat-completion" || (!wire && !requestConfig.interfaceType)) return "chat" as const;
+    return "responses" as const;
+}
+
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.textModel);
     try {
@@ -239,12 +255,13 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             if (answer === "没有返回内容") onDelta(answer);
             return answer;
         }
-        if (requestConfig.interfaceType === "claude-api") {
+        const route = await textRequestRoute(requestConfig);
+        if (route === "claude") {
             const answer = (await requestStreamingClaude(requestConfig, toClaudeBody(requestConfig, messages), onDelta, options)).content || "没有返回内容";
             if (answer === "没有返回内容") onDelta(answer);
             return answer;
         }
-        if (requestConfig.interfaceType === "chat-completion" || !requestConfig.interfaceType) {
+        if (route === "chat") {
             const answer =
                 (
                     await requestStreamingChatCompletion(
@@ -285,8 +302,9 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
         if (requestConfig.apiFormat === "gemini") {
             return await requestGeminiStreamingResponse(requestConfig, toGeminiBody(requestConfig, messages, toGeminiToolOptions(tools, toolChoice)), onDelta, options);
         }
-        if (requestConfig.interfaceType === "claude-api") return await requestStreamingClaude(requestConfig, toClaudeBody(requestConfig, messages, tools), onDelta, options);
-        if (requestConfig.interfaceType === "chat-completion" || !requestConfig.interfaceType) {
+        const route = await textRequestRoute(requestConfig);
+        if (route === "claude") return await requestStreamingClaude(requestConfig, toClaudeBody(requestConfig, messages, tools), onDelta, options);
+        if (route === "chat") {
             const chatPayload: Record<string, unknown> = {
                 model: requestConfig.model,
                 messages: toChatCompletionMessages(withSystemMessage(requestConfig, messages)),
