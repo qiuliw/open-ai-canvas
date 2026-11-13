@@ -5,8 +5,10 @@
   "pages": [
     "local-development",
     "canvas-agent-appearance",
+    "agent-mcp",
     "http-api",
     "external-model-api",
+    "wechat-login",
     "code-map",
     "backend-database",
     "channel-configuration",
