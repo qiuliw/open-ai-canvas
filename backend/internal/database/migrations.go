@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 105
+const CurrentSchemaVersion int64 = 106
 
 const baselineSchemaChecksum = "sha256:open-ai-canvas-schema-v1-20260830"
 const schemaMigrationAppliedAtIndexChecksum = "sha256:schema-migrations-applied-at-index-v2-20260830"
@@ -157,38 +157,37 @@ var schemaMigrations = []migration{
 	}},
 	{version: 46, name: "skill_curation", checksum: "sha256:skill-curation-v46-20261005", apply: migrateSkillCuration},
 	{version: 47, name: "skill_curation_roots", checksum: "sha256:skill-curation-roots-v47-20261005", apply: migrateSkillCurationRoots},
-	{version: 48, name: "discount_groups", checksum: discountGroupsChecksum, apply: migrateSchemaV48},
-	{version: 49, name: "channel_proxy_url", checksum: "sha256:channel-proxy-url-v48-20261009", apply: func(tx *gorm.DB) error {
+	{version: 48, name: "channel_proxy_url", checksum: "sha256:channel-proxy-url-v48-20261009", apply: func(tx *gorm.DB) error {
 		if !tx.Migrator().HasColumn(&model.ModelChannel{}, "ProxyURL") {
 			return tx.Migrator().AddColumn(&model.ModelChannel{}, "ProxyURL")
 		}
 		return nil
 	}},
-	{version: 50, name: "banner_sort_order", checksum: "sha256:banner-sort-order-v49-20261010", apply: func(tx *gorm.DB) error {
+	{version: 49, name: "banner_sort_order", checksum: "sha256:banner-sort-order-v49-20261010", apply: func(tx *gorm.DB) error {
 		if !tx.Migrator().HasColumn(&model.BannerAnnouncement{}, "SortOrder") {
 			return tx.Migrator().AddColumn(&model.BannerAnnouncement{}, "SortOrder")
 		}
 		return nil
 	}},
-	{version: 51, name: "canvas_mutation_receipts", checksum: "sha256:canvas-mutation-receipts-v50-20261011", apply: func(tx *gorm.DB) error {
+	{version: 50, name: "canvas_mutation_receipts", checksum: "sha256:canvas-mutation-receipts-v50-20261011", apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.CanvasMutationReceipt{})
 	}},
-	{version: 52, name: "personal_profile_security", checksum: "sha256:personal-profile-security-v51-20261012", apply: func(tx *gorm.DB) error {
+	{version: 51, name: "personal_profile_security", checksum: "sha256:personal-profile-security-v51-20261012", apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.User{}, &model.AuthSession{}, &model.OAuthState{}, &model.AuthVerification{}, &model.UserAvatar{})
 	}},
-	{version: 53, name: "user_avatar_presets", checksum: "sha256:user-avatar-presets-v52-20261012", apply: func(tx *gorm.DB) error {
+	{version: 52, name: "user_avatar_presets", checksum: "sha256:user-avatar-presets-v52-20261012", apply: func(tx *gorm.DB) error {
 		if tx.Migrator().HasColumn(&model.User{}, "AvatarPreset") {
 			return nil
 		}
 		return tx.Migrator().AddColumn(&model.User{}, "AvatarPreset")
 	}},
-	{version: 54, name: "user_login_logs", checksum: "sha256:user-login-logs-v53", apply: func(tx *gorm.DB) error {
+	{version: 53, name: "user_login_logs", checksum: "sha256:user-login-logs-v53", apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.LoginLog{})
 	}},
-	{version: 55, name: workbenchToolsMigrationName, checksum: workbenchToolsMigrationChecksum, apply: func(tx *gorm.DB) error {
+	{version: 54, name: workbenchToolsMigrationName, checksum: workbenchToolsMigrationChecksum, apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.WorkbenchTool{}, &model.WorkbenchPreset{}, &model.Task{})
 	}},
-	{version: 56, name: "provider_catalog_source", checksum: "sha256:provider-catalog-source-v55", apply: func(tx *gorm.DB) error {
+	{version: 55, name: "provider_catalog_source", checksum: "sha256:provider-catalog-source-v55", apply: func(tx *gorm.DB) error {
 		if !tx.Migrator().HasColumn(&model.ModelChannel{}, "CatalogProviderID") {
 			if err := tx.Migrator().AddColumn(&model.ModelChannel{}, "CatalogProviderID"); err != nil {
 				return err
@@ -199,13 +198,13 @@ var schemaMigrations = []migration{
 		}
 		return nil
 	}},
-	{version: 57, name: "sql_perf_indexes", checksum: "sha256:sql-perf-indexes-v56-20261016", apply: migrateSchemaV56},
-	{version: 58, name: "canvas_multi_session_sync", checksum: "sha256:canvas-multi-session-sync-v57", apply: migrateCanvasCollaboration},
-	{version: 59, name: "agent_memory_proposals", checksum: "sha256:agent-memory-proposals-v58", apply: func(tx *gorm.DB) error {
+	{version: 56, name: "sql_perf_indexes", checksum: "sha256:sql-perf-indexes-v56-20261016", apply: migrateSchemaV56},
+	{version: 57, name: "canvas_multi_session_sync", checksum: "sha256:canvas-multi-session-sync-v57", apply: migrateCanvasCollaboration},
+	{version: 58, name: "agent_memory_proposals", checksum: "sha256:agent-memory-proposals-v58", apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.AgentLesson{}, &model.AgentMemorySetting{}, &model.AgentMemoryProposal{}, &model.AgentMemoryRevision{})
 	}},
-	{version: 60, name: "channel_model_protocol_length", checksum: "sha256:channel-model-protocol-length-v59", apply: migrateChannelModelProtocolLength},
-	{version: 61, name: "user_feedbacks", checksum: "sha256:user-feedbacks-v60-20261020", apply: func(tx *gorm.DB) error {
+	{version: 59, name: "channel_model_protocol_length", checksum: "sha256:channel-model-protocol-length-v59", apply: migrateChannelModelProtocolLength},
+	{version: 60, name: "user_feedbacks", checksum: "sha256:user-feedbacks-v60-20261020", apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.UserFeedback{})
 	}},
 	{version: 61, name: "drama_production", checksum: "sha256:drama-production-v61-20261024", apply: func(tx *gorm.DB) error {
@@ -368,6 +367,8 @@ var schemaMigrations = []migration{
 	{version: 105, name: "external_model_api_keys", checksum: "sha256:external-model-api-keys-v105-20261111", apply: func(tx *gorm.DB) error {
 		return tx.AutoMigrate(&model.APIKey{})
 	}},
+	// develop 折扣分组：接在上游链之后，避免与官方 v48+ 编号冲突；apply 幂等。
+	{version: 106, name: "discount_groups", checksum: discountGroupsChecksum, apply: migrateSchemaV48},
 }
 
 func migrateAPILogGenerationContent(tx *gorm.DB) error {
